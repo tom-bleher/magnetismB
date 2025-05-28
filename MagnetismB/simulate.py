@@ -2,10 +2,49 @@
 # filepath: /home/tom/Desktop/magnetism/MagnetismB/simulate.py
 
 import numpy as np
-import matplotlib.pyplot as plt
+import matplotlib
+# Set backend for display - try different backends if one doesn't work
+try:
+    import matplotlib.pyplot as plt
+    # Check if we have a GUI backend available
+    if matplotlib.get_backend() == 'Agg':
+        # If we're on a headless system, try to set a GUI backend
+        try:
+            matplotlib.use('Qt5Agg')
+        except:
+            try:
+                matplotlib.use('TkAgg')
+            except:
+                try:
+                    matplotlib.use('GTK3Agg')
+                except:
+                    print("Warning: No GUI backend available. Plots will be saved but may not display.")
+                    matplotlib.use('Agg')
+    
+    print(f"Using matplotlib backend: {matplotlib.get_backend()}")
+    import matplotlib.pyplot as plt
+except ImportError as e:
+    print(f"Error importing matplotlib: {e}")
+    print("Please install matplotlib: pip install matplotlib")
+    exit(1)
+
 import pandas as pd
 import os
 from scipy.integrate import odeint
+import time
+
+def show_plot_with_message(plot_title="Plot"):
+    """Enhanced plot display function with debug info"""
+    try:
+        print(f"\n📊 Displaying {plot_title}...")
+        print("   (Close the plot window to continue)")
+        plt.show(block=False)  # Non-blocking show
+        plt.pause(0.1)  # Small pause to ensure plot appears
+        input("   Press Enter after viewing the plot to continue...")
+        plt.close('all')  # Close all plots
+    except Exception as e:
+        print(f"   Error displaying plot: {e}")
+        print("   Plot has been saved to file instead.")
 
 class MagnetThroughSpringSimulation:
     """
@@ -276,32 +315,41 @@ class MagnetThroughSpringSimulation:
     
     def plot_results(self, results, save_plots=True):
         """
-        Create comprehensive plots of the simulation results.
+        Plot only EMF vs Time - simplified version.
         
         Args:
             results: Dictionary containing simulation results
             save_plots: Whether to save plots to files
         """
-        # Create plots folder if it doesn't exist
-        if save_plots:
-            plots_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots')
-            os.makedirs(plots_folder, exist_ok=True)
+        # Create plots folder
+        plots_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots')
+        os.makedirs(plots_folder, exist_ok=True)
         
-        # Find EMF extrema for marking on plots
-        max_emf_idx = np.argmax(results['emf'])
-        min_emf_idx = np.argmin(results['emf'])
+        # Extract results
+        time = results['time']
+        position = results['position']
+        emf = results['emf']
         
-        # Determine spring interaction period
+        # Find EMF extrema
+        max_emf_idx = np.argmax(np.abs(emf))
+        min_emf_idx = np.argmin(emf)
+        
+        print(f"EMF extrema:")
+        print(f"  Maximum EMF: {emf[max_emf_idx]*1000:.2f} mV at t = {time[max_emf_idx]:.4f} s")
+        print(f"  Minimum EMF: {emf[min_emf_idx]*1000:.2f} mV at t = {time[min_emf_idx]:.4f} s")
+        print(f"  Peak-to-peak EMF: {(emf[max_emf_idx] - emf[min_emf_idx])*1000:.2f} mV")
+        
+        # Find the time window when magnet is interacting with spring
         spring_top = self.L/2
         spring_bottom = -self.L/2
         spring_buffer = 0.1  # 10 cm buffer around spring
         
-        # Find when magnet enters and exits the spring region (with buffer)
+        # Define interaction region
         enter_region = spring_top + spring_buffer
         exit_region = spring_bottom - spring_buffer
         
-        # Find indices where magnet is in the interaction region
-        in_region_mask = (results['position'] <= enter_region) & (results['position'] >= exit_region)
+        # Find indices where magnet is in interaction region
+        in_region_mask = (position <= enter_region) & (position >= exit_region)
         interaction_indices = np.where(in_region_mask)[0]
         
         if len(interaction_indices) > 0:
@@ -312,168 +360,29 @@ class MagnetThroughSpringSimulation:
             
             # Create focused time window
             time_focused = results['time'][start_time_idx:end_time_idx+1]
-            position_focused = results['position'][start_time_idx:end_time_idx+1]
-            velocity_focused = results['velocity'][start_time_idx:end_time_idx+1]
             emf_focused = results['emf'][start_time_idx:end_time_idx+1]
-            flux_focused = results['flux'][start_time_idx:end_time_idx+1]
             
-            # Adjust extrema indices for focused window
-            max_emf_idx_focused = max_emf_idx - start_time_idx if start_time_idx <= max_emf_idx <= end_time_idx else None
-            min_emf_idx_focused = min_emf_idx - start_time_idx if start_time_idx <= min_emf_idx <= end_time_idx else None
-            
-            print(f"Focusing plots on spring interaction period:")
+            print(f"Focusing plot on spring interaction period:")
             print(f"  Time range: {time_focused[0]:.3f} - {time_focused[-1]:.3f} s")
             print(f"  Duration: {time_focused[-1] - time_focused[0]:.3f} s")
         else:
             # Fallback to full time series if no interaction detected
             time_focused = results['time']
-            position_focused = results['position']
-            velocity_focused = results['velocity']
             emf_focused = results['emf']
-            flux_focused = results['flux']
-            max_emf_idx_focused = max_emf_idx
-            min_emf_idx_focused = min_emf_idx
-            start_time_idx = 0
         
-        # Create figure with subplots - FOCUSED VERSION
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
-        
-        # Plot 1: Position vs Time (Focused)
-        ax1.plot(time_focused, position_focused * 1000, 'b-', linewidth=2)
-        ax1.set_xlabel('Time (s)')
-        ax1.set_ylabel('Position (mm)')
-        ax1.set_title('Magnet Position vs Time (Spring Interaction Period)')
-        ax1.grid(True, alpha=0.3)
-        
-        # Add spring boundaries
-        ax1.axhline(-self.L/2 * 1000, color='red', linestyle='--', alpha=0.7, label='Spring bottom')
-        ax1.axhline(self.L/2 * 1000, color='red', linestyle='--', alpha=0.7, label='Spring top')
-        
-        # Mark EMF extrema positions (if in focused window)
-        if max_emf_idx_focused is not None and 0 <= max_emf_idx_focused < len(time_focused):
-            ax1.scatter(time_focused[max_emf_idx_focused], position_focused[max_emf_idx_focused] * 1000, 
-                       color='orange', s=100, marker='*', zorder=5, label='Max EMF position')
-        if min_emf_idx_focused is not None and 0 <= min_emf_idx_focused < len(time_focused):
-            ax1.scatter(time_focused[min_emf_idx_focused], position_focused[min_emf_idx_focused] * 1000, 
-                       color='purple', s=100, marker='*', zorder=5, label='Min EMF position')
-        ax1.legend()
-        
-        # Plot 2: Velocity vs Time (Focused)
-        ax2.plot(time_focused, velocity_focused, 'g-', linewidth=2)
-        ax2.set_xlabel('Time (s)')
-        ax2.set_ylabel('Velocity (m/s)')
-        ax2.set_title('Magnet Velocity vs Time (Spring Interaction Period)')
-        ax2.grid(True, alpha=0.3)
-        
-        # Mark EMF extrema times (if in focused window)
-        if max_emf_idx_focused is not None and 0 <= max_emf_idx_focused < len(time_focused):
-            ax2.scatter(time_focused[max_emf_idx_focused], velocity_focused[max_emf_idx_focused], 
-                       color='orange', s=100, marker='*', zorder=5, label='Max EMF time')
-        if min_emf_idx_focused is not None and 0 <= min_emf_idx_focused < len(time_focused):
-            ax2.scatter(time_focused[min_emf_idx_focused], velocity_focused[min_emf_idx_focused], 
-                       color='purple', s=100, marker='*', zorder=5, label='Min EMF time')
-        ax2.legend()
-        
-        # Plot 3: EMF vs Time (Main result - Focused)
-        ax3.plot(time_focused, emf_focused * 1000, 'r-', linewidth=2)
-        ax3.set_xlabel('Time (s)')
-        ax3.set_ylabel('Induced EMF (mV)')
-        ax3.set_title('Induced EMF vs Time (Spring Interaction Period)')
-        ax3.grid(True, alpha=0.3)
-        
-        # Mark EMF extrema (if in focused window)
-        if max_emf_idx_focused is not None and 0 <= max_emf_idx_focused < len(time_focused):
-            ax3.scatter(time_focused[max_emf_idx_focused], emf_focused[max_emf_idx_focused] * 1000, 
-                       color='orange', s=150, marker='*', zorder=5, 
-                       label=f'Max EMF: {emf_focused[max_emf_idx_focused]*1000:.1f} mV')
-        if min_emf_idx_focused is not None and 0 <= min_emf_idx_focused < len(time_focused):
-            ax3.scatter(time_focused[min_emf_idx_focused], emf_focused[min_emf_idx_focused] * 1000, 
-                       color='purple', s=150, marker='*', zorder=5, 
-                       label=f'Min EMF: {emf_focused[min_emf_idx_focused]*1000:.1f} mV')
-        ax3.legend()
-        
-        # Plot 4: Magnetic Flux vs Time (Focused)
-        ax4.plot(time_focused, flux_focused * 1e6, 'm-', linewidth=2)
-        ax4.set_xlabel('Time (s)')
-        ax4.set_ylabel('Magnetic Flux (μWb)')
-        ax4.set_title('Magnetic Flux vs Time (Spring Interaction Period)')
-        ax4.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        
-        if save_plots:
-            plt.savefig(os.path.join(plots_folder, 'magnet_simulation_overview_focused.png'), dpi=300, bbox_inches='tight')
-        plt.show()
-        
-        # Create detailed EMF plot (Focused)
+        # Create EMF vs Time plot only
         plt.figure(figsize=(12, 8))
         plt.plot(time_focused, emf_focused * 1000, 'r-', linewidth=2, label='Induced EMF')
         plt.xlabel('Time (s)', fontsize=12)
         plt.ylabel('Induced EMF (mV)', fontsize=12)
-        plt.title('Induced EMF vs Time - Magnet Through Spring (Focused View)', fontsize=14)
+        plt.title('Induced EMF vs Time - Magnet Through Spring', fontsize=14)
         plt.grid(True, alpha=0.3)
-        
-        # Mark EMF extrema with detailed annotations (if in focused window)
-        if max_emf_idx_focused is not None and 0 <= max_emf_idx_focused < len(time_focused):
-            plt.scatter(time_focused[max_emf_idx_focused], emf_focused[max_emf_idx_focused] * 1000, 
-                       color='orange', s=150, marker='*', zorder=5, label='Maximum EMF')
-            
-            # Position relative to spring
-            spring_top = self.L/2
-            max_emf_from_top = spring_top - position_focused[max_emf_idx_focused]
-            
-            plt.annotate(f'Peak EMF: {emf_focused[max_emf_idx_focused]*1000:.2f} mV\nat t = {time_focused[max_emf_idx_focused]:.4f} s\n{max_emf_from_top*1000:.1f} mm from spring top',
-                        xy=(time_focused[max_emf_idx_focused], emf_focused[max_emf_idx_focused] * 1000),
-                        xytext=(time_focused[max_emf_idx_focused] + (time_focused[-1] - time_focused[0]) * 0.15, 
-                               emf_focused[max_emf_idx_focused] * 1000 * 0.8),
-                        arrowprops=dict(arrowstyle='->', color='orange'),
-                        fontsize=10, ha='left', bbox=dict(boxstyle="round,pad=0.3", facecolor="orange", alpha=0.3))
-        
-        if min_emf_idx_focused is not None and 0 <= min_emf_idx_focused < len(time_focused):
-            plt.scatter(time_focused[min_emf_idx_focused], emf_focused[min_emf_idx_focused] * 1000, 
-                       color='purple', s=150, marker='*', zorder=5, label='Minimum EMF')
-            
-            spring_top = self.L/2
-            min_emf_from_top = spring_top - position_focused[min_emf_idx_focused]
-            
-            plt.annotate(f'Min EMF: {emf_focused[min_emf_idx_focused]*1000:.2f} mV\nat t = {time_focused[min_emf_idx_focused]:.4f} s\n{min_emf_from_top*1000:.1f} mm from spring top',
-                        xy=(time_focused[min_emf_idx_focused], emf_focused[min_emf_idx_focused] * 1000),
-                        xytext=(time_focused[min_emf_idx_focused] + (time_focused[-1] - time_focused[0]) * 0.15, 
-                               emf_focused[min_emf_idx_focused] * 1000 * 0.8),
-                        arrowprops=dict(arrowstyle='->', color='purple'),
-                        fontsize=10, ha='left', bbox=dict(boxstyle="round,pad=0.3", facecolor="purple", alpha=0.3))
-        
         plt.legend(fontsize=12)
         
         if save_plots:
-            plt.savefig(os.path.join(plots_folder, 'emf_vs_time_focused.png'), dpi=300, bbox_inches='tight')
-        plt.show()
+            plt.savefig(os.path.join(plots_folder, 'emf_vs_time.png'), dpi=300, bbox_inches='tight')
         
-        # Create phase plot (EMF vs Position) - also focused
-        plt.figure(figsize=(10, 8))
-        plt.plot(position_focused * 1000, emf_focused * 1000, 'b-', linewidth=2)
-        plt.xlabel('Position (mm)', fontsize=12)
-        plt.ylabel('Induced EMF (mV)', fontsize=12)
-        plt.title('EMF vs Position - Phase Plot (Spring Interaction)', fontsize=14)
-        plt.grid(True, alpha=0.3)
-        
-        # Add spring boundaries
-        plt.axvline(-self.L/2 * 1000, color='red', linestyle='--', alpha=0.7, label='Spring bottom')
-        plt.axvline(self.L/2 * 1000, color='red', linestyle='--', alpha=0.7, label='Spring top')
-        
-        # Mark EMF extrema on position plot (if in focused window)
-        if max_emf_idx_focused is not None and 0 <= max_emf_idx_focused < len(time_focused):
-            plt.scatter(position_focused[max_emf_idx_focused] * 1000, emf_focused[max_emf_idx_focused] * 1000, 
-                       color='orange', s=150, marker='*', zorder=5, label='Maximum EMF')
-        if min_emf_idx_focused is not None and 0 <= min_emf_idx_focused < len(time_focused):
-            plt.scatter(position_focused[min_emf_idx_focused] * 1000, emf_focused[min_emf_idx_focused] * 1000, 
-                       color='purple', s=150, marker='*', zorder=5, label='Minimum EMF')
-        
-        plt.legend()
-        
-        if save_plots:
-            plt.savefig(os.path.join(plots_folder, 'emf_vs_position_focused.png'), dpi=300, bbox_inches='tight')
-        plt.show()
+        show_plot_with_message("EMF vs Time plot")
     
     def save_data(self, results, filename='simulation_data.csv'):
         """
@@ -870,175 +779,26 @@ def create_length_analysis_plots(spring_lengths, max_emf_values, min_emf_values,
                                 min_emf_positions, total_resistance, max_current_values, 
                                 energy_dissipated, turn_density):
     """
-    Create comprehensive plots showing how coil length affects EMF characteristics.
+    Create simplified EMF magnitude vs coil length plot only.
     """
     # Create plots folder
     plots_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots')
     os.makedirs(plots_folder, exist_ok=True)
     
-    # Create figure with multiple subplots
-    fig = plt.figure(figsize=(20, 16))
-    
-    # Plot 1: EMF vs Coil Length
-    ax1 = plt.subplot(3, 3, 1)
-    plt.loglog(spring_lengths, np.abs(max_emf_values) * 1000, 'ro-', linewidth=2, markersize=6, label='Max EMF')
-    plt.loglog(spring_lengths, np.abs(min_emf_values) * 1000, 'bo-', linewidth=2, markersize=6, label='|Min EMF|')
-    plt.loglog(spring_lengths, peak_to_peak_emf * 1000, 'go-', linewidth=2, markersize=6, label='Peak-to-Peak EMF')
-    plt.xlabel('Coil Length (m)')
-    plt.ylabel('EMF (mV)')
-    plt.title('EMF Magnitude vs Coil Length')
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    
-    # Plot 2: Interaction Time vs Coil Length
-    ax2 = plt.subplot(3, 3, 2)
-    plt.loglog(spring_lengths, interaction_times, 'mo-', linewidth=2, markersize=6)
-    plt.xlabel('Coil Length (m)')
-    plt.ylabel('Interaction Time (s)')
-    plt.title('EMF Interaction Duration vs Coil Length')
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 3: Resistance vs Coil Length
-    ax3 = plt.subplot(3, 3, 3)
-    plt.loglog(spring_lengths, total_resistance * 1000, 'co-', linewidth=2, markersize=6)
-    plt.xlabel('Coil Length (m)')
-    plt.ylabel('Resistance (mΩ)')
-    plt.title('Coil Resistance vs Length')
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 4: Maximum Current vs Coil Length
-    ax4 = plt.subplot(3, 3, 4)
-    plt.loglog(spring_lengths, max_current_values * 1000, 'yo-', linewidth=2, markersize=6)
-    plt.xlabel('Coil Length (m)')
-    plt.ylabel('Max Current (mA)')
-    plt.title('Maximum Current vs Coil Length')
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 5: Energy Dissipated vs Coil Length
-    ax5 = plt.subplot(3, 3, 5)
-    plt.loglog(spring_lengths, energy_dissipated * 1e6, 'ko-', linewidth=2, markersize=6)
-    plt.xlabel('Coil Length (m)')
-    plt.ylabel('Energy Dissipated (μJ)')
-    plt.title('Energy Dissipation vs Coil Length')
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 6: EMF Position Analysis
-    ax6 = plt.subplot(3, 3, 6)
-    # Convert positions to fraction of coil length from top
-    max_emf_fractions = []
-    min_emf_fractions = []
-    
-    for i, length in enumerate(spring_lengths):
-        if not np.isnan(max_emf_positions[i]):
-            spring_top = length/2
-            max_pos_from_top = spring_top - max_emf_positions[i]
-            max_emf_fractions.append(max_pos_from_top / length)
-        else:
-            max_emf_fractions.append(np.nan)
-            
-        if not np.isnan(min_emf_positions[i]):
-            spring_top = length/2
-            min_pos_from_top = spring_top - min_emf_positions[i]
-            min_emf_fractions.append(min_pos_from_top / length)
-        else:
-            min_emf_fractions.append(np.nan)
-    
-    plt.semilogx(spring_lengths, max_emf_fractions, 'ro-', linewidth=2, markersize=6, label='Max EMF Position')
-    plt.semilogx(spring_lengths, min_emf_fractions, 'bo-', linewidth=2, markersize=6, label='Min EMF Position')
-    plt.xlabel('Coil Length (m)')
-    plt.ylabel('Position (fraction from top)')
-    plt.title('EMF Extrema Positions vs Coil Length')
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    
-    # Plot 7: EMF per unit length
-    ax7 = plt.subplot(3, 3, 7)
-    emf_per_meter = peak_to_peak_emf / spring_lengths
-    plt.loglog(spring_lengths, emf_per_meter * 1000, 'ro-', linewidth=2, markersize=6)
-    plt.xlabel('Coil Length (m)')
-    plt.ylabel('EMF per Unit Length (mV/m)')
-    plt.title('EMF Efficiency vs Coil Length')
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 8: Number of turns vs Length
-    ax8 = plt.subplot(3, 3, 8)
-    num_turns = spring_lengths * turn_density
-    plt.loglog(spring_lengths, num_turns, 'go-', linewidth=2, markersize=6)
-    plt.xlabel('Coil Length (m)')
-    plt.ylabel('Number of Turns')
-    plt.title(f'Number of Turns (Density: {turn_density:.1f} turns/m)')
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 9: Power vs Coil Length
-    ax9 = plt.subplot(3, 3, 9)
-    # Peak power = EMF²/R
-    peak_power = peak_to_peak_emf**2 / total_resistance
-    plt.loglog(spring_lengths, peak_power * 1e6, 'mo-', linewidth=2, markersize=6)
-    plt.xlabel('Coil Length (m)')
-    plt.ylabel('Peak Power (μW)')
-    plt.title('Peak Power vs Coil Length')
-    plt.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(plots_folder, 'coil_length_analysis.png'), dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    # Create a summary plot with key trends
-    plt.figure(figsize=(14, 10))
-    
-    # Subplot 1: EMF trends
-    plt.subplot(2, 2, 1)
+    # Create single EMF magnitude plot
+    plt.figure(figsize=(10, 8))
     plt.loglog(spring_lengths, np.abs(max_emf_values) * 1000, 'ro-', linewidth=3, markersize=8, label='Max EMF')
+    plt.loglog(spring_lengths, np.abs(min_emf_values) * 1000, 'bo-', linewidth=3, markersize=8, label='|Min EMF|')
     plt.loglog(spring_lengths, peak_to_peak_emf * 1000, 'go-', linewidth=3, markersize=8, label='Peak-to-Peak EMF')
-    plt.xlabel('Coil Length (m)', fontsize=12)
-    plt.ylabel('EMF (mV)', fontsize=12)
-    plt.title('EMF Scaling with Coil Length', fontsize=14)
+    plt.xlabel('Coil Length (m)', fontsize=14)
+    plt.ylabel('EMF (mV)', fontsize=14)
+    plt.title('EMF Magnitude vs Coil Length', fontsize=16)
     plt.grid(True, alpha=0.3)
     plt.legend(fontsize=12)
     
-    # Subplot 2: Time and resistance scaling
-    plt.subplot(2, 2, 2)
-    ax2a = plt.gca()
-    line1 = ax2a.loglog(spring_lengths, interaction_times, 'mo-', linewidth=3, markersize=8, label='Interaction Time')
-    ax2a.set_xlabel('Coil Length (m)', fontsize=12)
-    ax2a.set_ylabel('Interaction Time (s)', fontsize=12, color='m')
-    ax2a.tick_params(axis='y', labelcolor='m')
-    
-    ax2b = ax2a.twinx()
-    line2 = ax2b.loglog(spring_lengths, total_resistance * 1000, 'co-', linewidth=3, markersize=8, label='Resistance')
-    ax2b.set_ylabel('Resistance (mΩ)', fontsize=12, color='c')
-    ax2b.tick_params(axis='y', labelcolor='c')
-    
-    plt.title('Time & Resistance Scaling', fontsize=14)
-    ax2a.grid(True, alpha=0.3)
-    
-    # Subplot 3: Energy and power
-    plt.subplot(2, 2, 3)
-    ax3a = plt.gca()
-    line3 = ax3a.loglog(spring_lengths, energy_dissipated * 1e6, 'ko-', linewidth=3, markersize=8, label='Energy')
-    ax3a.set_xlabel('Coil Length (m)', fontsize=12)
-    ax3a.set_ylabel('Energy Dissipated (μJ)', fontsize=12, color='k')
-    ax3a.tick_params(axis='y', labelcolor='k')
-    
-    ax3b = ax3a.twinx()
-    line4 = ax3b.loglog(spring_lengths, peak_power * 1e6, 'ro-', linewidth=3, markersize=8, label='Peak Power')
-    ax3b.set_ylabel('Peak Power (μW)', fontsize=12, color='r')
-    ax3b.tick_params(axis='y', labelcolor='r')
-    
-    plt.title('Energy & Power Scaling', fontsize=14)
-    ax3a.grid(True, alpha=0.3)
-    
-    # Subplot 4: EMF efficiency
-    plt.subplot(2, 2, 4)
-    plt.loglog(spring_lengths, emf_per_meter * 1000, 'ro-', linewidth=3, markersize=8)
-    plt.xlabel('Coil Length (m)', fontsize=12)
-    plt.ylabel('EMF per Unit Length (mV/m)', fontsize=12)
-    plt.title('EMF Efficiency vs Coil Length', fontsize=14)
-    plt.grid(True, alpha=0.3)
-    
     plt.tight_layout()
-    plt.savefig(os.path.join(plots_folder, 'coil_length_summary.png'), dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(plots_folder, 'coil_length_analysis.png'), dpi=300, bbox_inches='tight')
+    show_plot_with_message("EMF vs Coil Length Analysis")
 
 
 def save_length_analysis_data(spring_lengths, max_emf_values, min_emf_values, 
@@ -1164,17 +924,14 @@ def compare_coil_lengths():
 
 def create_coil_length_overlay_plots(all_results, all_sims, lengths_to_compare, colors, line_styles):
     """
-    Create overlay plots comparing EMF curves for different coil lengths.
+    Create EMF vs Time overlay plot comparing different coil lengths.
     """
     # Create plots folder
     plots_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots')
     os.makedirs(plots_folder, exist_ok=True)
     
-    # Create figure with multiple subplots
-    fig = plt.figure(figsize=(18, 12))
-    
-    # Plot 1: EMF vs Time (Focused on interaction periods)
-    ax1 = plt.subplot(2, 3, 1)
+    # Create single EMF vs Time overlay plot
+    plt.figure(figsize=(12, 8))
     
     for i, length in enumerate(lengths_to_compare):
         results = all_results[length]
@@ -1208,131 +965,16 @@ def create_coil_length_overlay_plots(all_results, all_sims, lengths_to_compare, 
         plt.plot(time_shifted, emf_focused * 1000, color=colors[i], linestyle=line_styles[i], 
                 linewidth=3, label=f'L = {length} m')
     
-    plt.xlabel('Time from interaction start (s)')
-    plt.ylabel('Induced EMF (mV)')
-    plt.title('EMF vs Time - Coil Length Comparison')
+    plt.xlabel('Time from interaction start (s)', fontsize=14)
+    plt.ylabel('Induced EMF (mV)', fontsize=14)
+    plt.title('EMF vs Time - Coil Length Comparison', fontsize=16)
     plt.grid(True, alpha=0.3)
-    plt.legend()
-    
-    # Plot 2: EMF vs Position (relative to spring)
-    ax2 = plt.subplot(2, 3, 2)
-    
-    for i, length in enumerate(lengths_to_compare):
-        results = all_results[length]
-        sim = all_sims[length]
-        
-        # Convert position to fraction of spring length from top
-        spring_top = sim.L/2
-        position_relative = (spring_top - results['position']) / sim.L
-        
-        # Only plot when magnet is near the spring
-        mask = (position_relative >= -0.5) & (position_relative <= 1.5)
-        
-        plt.plot(position_relative[mask], results['emf'][mask] * 1000, 
-                color=colors[i], linestyle=line_styles[i], linewidth=2, 
-                label=f'L = {length} m')
-    
-    plt.xlabel('Position (fraction of spring length from top)')
-    plt.ylabel('Induced EMF (mV)')
-    plt.title('EMF vs Relative Position')
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    
-    # Add coil boundaries
-    if hasattr(sim, 'L'):
-        spring_extent = sim.L/2 * 1000  # mm
-        plt.axvline(spring_extent, color=colors[i], linestyle=':', alpha=0.5)
-        plt.axvline(-spring_extent, color=colors[i], linestyle=':', alpha=0.5)
-    
-    # Plot 3: Peak EMF comparison
-    ax3 = plt.subplot(2, 3, 3)
-    
-    seg_max = np.max(all_results[length]['emf']) * 1000
-    seg_min = np.min(all_results[length]['emf']) * 1000
-    cont_max = np.max(all_results[length]['emf']) * 1000
-    cont_min = np.min(all_results[length]['emf']) * 1000
-    
-    x_pos = [0, 1]
-    max_emfs = [seg_max, cont_max]
-    min_emfs = [abs(seg_min), abs(cont_min)]
-    peak_to_peak = [seg_max - seg_min, cont_max - cont_min]
-    
-    width = 0.25
-    plt.bar([x - width for x in x_pos], max_emfs, width, label='Max EMF', alpha=0.7, color='orange')
-    plt.bar(x_pos, min_emfs, width, label='|Min EMF|', alpha=0.7, color='purple')
-    plt.bar([x + width for x in x_pos], peak_to_peak, width, label='Peak-to-Peak', alpha=0.7, color='green')
-    
-    plt.xlabel('Coil Type')
-    plt.ylabel('EMF (mV)')
-    plt.title('EMF Magnitude Comparison')
-    plt.xticks(x_pos, ['Segmented', 'Continuous'])
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 4: Power comparison
-    ax4 = plt.subplot(2, 3, 4)
-    
-    seg_power = all_results[length]['emf']**2 / sim.resistance
-    cont_power = all_results[length]['emf']**2 / sim.resistance
-    
-    seg_peak_power = np.max(seg_power) * 1e6  # μW
-    cont_peak_power = np.max(cont_power) * 1e6
-    
-    seg_avg_power = np.mean(seg_power) * 1e6
-    cont_avg_power = np.mean(cont_power) * 1e6
-    
-    x_pos = [0, 1]
-    peak_powers = [seg_peak_power, cont_peak_power]
-    avg_powers = [seg_avg_power, cont_avg_power]
-    
-    width = 0.35
-    plt.bar([x - width/2 for x in x_pos], peak_powers, width, label='Peak Power', alpha=0.7)
-    plt.bar([x + width/2 for x in x_pos], avg_powers, width, label='Avg Power', alpha=0.7)
-    
-    plt.xlabel('Coil Type')
-    plt.ylabel('Power (μW)')
-    plt.title('Power Generation Comparison')
-    plt.xticks(x_pos, ['Segmented', 'Continuous'])
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 5: Resistance comparison
-    ax5 = plt.subplot(2, 3, 5)
-    
-    resistances = [sim.resistance * 1000, sim.resistance * 1000]
-    plt.bar(x_pos, resistances, color=['red', 'blue'], alpha=0.7)
-    plt.xlabel('Coil Type')
-    plt.ylabel('Resistance (mΩ)')
-    plt.title('Coil Resistance Comparison')
-    plt.xticks(x_pos, ['Segmented', 'Continuous'])
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 6: Coil geometry visualization
-    ax6 = plt.subplot(2, 3, 6)
-    
-    # Draw coil
-    if hasattr(sim, 'L'):
-        cont_start = -sim.L/2 * 1000
-        cont_end = sim.L/2 * 1000
-        plt.plot([cont_start, cont_end], [0, 0], 'b-', linewidth=8, alpha=0.7, label='Continuous coil')
-    
-    plt.ylim(-0.5, 1.5)
-    plt.xlabel('Position (mm)')
-    plt.title('Coil Geometry Comparison')
-    plt.yticks([0, 1], ['Continuous', 'Segmented'])
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=12)
     
     plt.tight_layout()
     plt.savefig(os.path.join(plots_folder, 'coil_length_comparison.png'), 
                 dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    # Print summary
-    print(f"\nComparison Summary:")
-    print(f"Segmented coil - Max EMF: {seg_max:.2f} mV, Peak-to-Peak: {seg_max-seg_min:.2f} mV")
-    print(f"Continuous coil - Max EMF: {cont_max:.2f} mV, Peak-to-Peak: {cont_max-cont_min:.2f} mV")
-    print(f"EMF Ratio (Segmented/Continuous): {(seg_max-seg_min)/(cont_max-cont_min):.3f}")
+    show_plot_with_message("EMF vs Time - Coil Length Comparison")
 
 
 def print_coil_comparison_summary(segmented_results, continuous_results,
@@ -1369,27 +1011,13 @@ def print_coil_comparison_summary(segmented_results, continuous_results,
     print(f"  Ratio: {seg_resistance/cont_resistance:.3f}")
     
     # Power comparison
-    seg_power = segmented_results['emf']**2 / segmented_sim.resistance
-    cont_power = continuous_results['emf']**2 / continuous_sim.resistance
+    seg_peak_power = seg_peak_to_peak**2 / seg_resistance * 1000  # μW
+    cont_peak_power = cont_peak_to_peak**2 / cont_resistance * 1000
     
-    seg_peak_power = np.max(seg_power) * 1e6
-    cont_peak_power = np.max(cont_power) * 1e6
-    
-    print(f"\nPower Comparison:")
-    print(f"  Segmented peak power: {seg_peak_power:.2f} μW")
-    print(f"  Continuous peak power: {cont_peak_power:.2f} μW")
+    print(f"\nPeak Power Comparison:")
+    print(f"  Segmented coil: {seg_peak_power:.2f} μW")
+    print(f"  Continuous coil: {cont_peak_power:.2f} μW")
     print(f"  Ratio: {seg_peak_power/cont_peak_power:.3f}")
-    
-    # Geometry summary
-    if hasattr(segmented_sim, 'segment_centers'):
-        print(f"\nGeometry Summary:")
-        print(f"  Segmented coil:")
-        print(f"    - {segmented_sim.num_segments} segments of {segmented_sim.segment_length*1000:.1f} mm each")
-        print(f"    - {segmented_sim.gap_length*1000:.1f} mm gaps between segments")
-        print(f"    - {segmented_sim.turns_per_segment} turns per segment")
-        print(f"  Continuous coil:")
-        print(f"    - Single coil of {continuous_sim.L*1000:.1f} mm")
-        print(f"    - {continuous_sim.N} total turns")
 
 
 def create_scientific_emf_time_plot(all_results, all_sims, gap_lengths):
@@ -1627,7 +1255,7 @@ def analyze_gap_length_effects():
 
 def create_gap_length_analysis_plots(all_results, all_sims, gap_lengths):
     """
-    Create comprehensive plots showing how gap length affects EMF characteristics.
+    Create simplified EMF vs Time overlay plot for gap length comparison.
     """
     plots_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots')
     os.makedirs(plots_folder, exist_ok=True)
@@ -1636,11 +1264,8 @@ def create_gap_length_analysis_plots(all_results, all_sims, gap_lengths):
     colors = plt.cm.viridis(np.linspace(0, 1, len(gap_lengths)))
     continuous_color = 'red'
     
-    # Create main comparison figure
-    fig = plt.figure(figsize=(20, 15))
-    
-    # Plot 1: EMF vs Time overlay
-    ax1 = plt.subplot(3, 3, 1)
+    # Create single EMF vs Time overlay plot
+    plt.figure(figsize=(12, 8))
     
     # Plot continuous coil first
     if 'continuous' in all_results and all_results['continuous'] is not None:
@@ -1650,7 +1275,7 @@ def create_gap_length_analysis_plots(all_results, all_sims, gap_lengths):
             time_focused = results['time'][mask]
             emf_focused = results['emf'][mask]
             time_shifted = time_focused - time_focused[0]
-            ax1.plot(time_shifted, emf_focused * 1000, color=continuous_color, 
+            plt.plot(time_shifted, emf_focused * 1000, color=continuous_color, 
                     linewidth=3, label='Continuous', linestyle='-')
     
     # Plot segmented coils
@@ -1662,271 +1287,57 @@ def create_gap_length_analysis_plots(all_results, all_sims, gap_lengths):
                 time_focused = results['time'][mask]
                 emf_focused = results['emf'][mask]
                 time_shifted = time_focused - time_focused[0]
-                ax1.plot(time_shifted, emf_focused * 1000, color=colors[i], 
+                plt.plot(time_shifted, emf_focused * 1000, color=colors[i], 
                         linewidth=2, label=f'Gap: {gap_length*1000:.1f}mm')
     
-    ax1.set_xlabel('Time from interaction start (s)')
-    ax1.set_ylabel('Induced EMF (mV)')
-    ax1.set_title('EMF vs Time - Gap Length Comparison')
-    ax1.grid(True, alpha=0.3)
-    ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    
-    # Plot 2: EMF vs Position overlay
-    ax2 = plt.subplot(3, 3, 2)
-    
-    # Plot continuous coil
-    if 'continuous' in all_results and all_results['continuous'] is not None:
-        results = all_results['continuous']
-        position_mm = results['position'] * 1000
-        mask = (np.abs(position_mm) <= 750)
-        ax2.plot(position_mm[mask], results['emf'][mask] * 1000, 
-                color=continuous_color, linewidth=3, label='Continuous')
-    
-    # Plot segmented coils
-    for i, gap_length in enumerate(gap_lengths):
-        if gap_length in all_results and all_results[gap_length] is not None:
-            results = all_results[gap_length]
-            position_mm = results['position'] * 1000
-            mask = (np.abs(position_mm) <= 750)
-            ax2.plot(position_mm[mask], results['emf'][mask] * 1000, 
-                    color=colors[i], linewidth=2, label=f'{gap_length*1000:.1f}mm')
-    
-    ax2.set_xlabel('Position from center (mm)')
-    ax2.set_ylabel('Induced EMF (mV)')
-    ax2.set_title('EMF vs Position - Gap Length Comparison')
-    ax2.grid(True, alpha=0.3)
-    ax2.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    
-    # Plot 3: Peak EMF vs Gap Length
-    ax3 = plt.subplot(3, 3, 3)
-    
-    gap_mm = [g * 1000 for g in gap_lengths]
-    max_emfs = []
-    min_emfs = []
-    peak_to_peak_emfs = []
-    
-    for gap_length in gap_lengths:
-        if gap_length in all_results and all_results[gap_length] is not None:
-            results = all_results[gap_length]
-            max_emf = np.max(results['emf']) * 1000
-            min_emf = np.min(results['emf']) * 1000
-            max_emfs.append(max_emf)
-            min_emfs.append(abs(min_emf))
-            peak_to_peak_emfs.append(max_emf - min_emf)
-        else:
-            max_emfs.append(np.nan)
-            min_emfs.append(np.nan)
-            peak_to_peak_emfs.append(np.nan)
-    
-    ax3.plot(gap_mm, max_emfs, 'ro-', linewidth=2, markersize=8, label='Max EMF')
-    ax3.plot(gap_mm, min_emfs, 'bo-', linewidth=2, markersize=8, label='|Min EMF|')
-    ax3.plot(gap_mm, peak_to_peak_emfs, 'go-', linewidth=2, markersize=8, label='Peak-to-Peak')
-    
-    # Add continuous coil reference line
-    if 'continuous' in all_results and all_results['continuous'] is not None:
-        cont_results = all_results['continuous']
-        cont_max = np.max(cont_results['emf']) * 1000
-        cont_min = np.min(cont_results['emf']) * 1000
-        cont_p2p = cont_max - cont_min
-        ax3.axhline(cont_max, color='red', linestyle='--', alpha=0.7, label='Continuous Max')
-        ax3.axhline(cont_p2p, color='green', linestyle='--', alpha=0.7, label='Continuous P2P')
-    
-    ax3.set_xlabel('Gap Length (mm)')
-    ax3.set_ylabel('EMF (mV)')
-    ax3.set_title('EMF Magnitude vs Gap Length')
-    ax3.grid(True, alpha=0.3)
-    ax3.legend()
-    
-    # Plot 4: Resistance vs Gap Length
-    ax4 = plt.subplot(3, 3, 4)
-    
-    resistances = []
-    for gap_length in gap_lengths:
-        if gap_length in all_sims and all_sims[gap_length] is not None:
-            resistances.append(all_sims[gap_length].resistance * 1000)
-        else:
-            resistances.append(np.nan)
-    
-    ax4.plot(gap_mm, resistances, 'co-', linewidth=2, markersize=8)
-    
-    # Add continuous coil reference
-    if 'continuous' in all_sims and all_sims['continuous'] is not None:
-        cont_resistance = all_sims['continuous'].resistance * 1000
-        ax4.axhline(cont_resistance, color='red', linestyle='--', alpha=0.7, 
-                   label=f'Continuous: {cont_resistance:.1f} mΩ')
-    
-    ax4.set_xlabel('Gap Length (mm)')
-    ax4.set_ylabel('Resistance (mΩ)')
-    ax4.set_title('Coil Resistance vs Gap Length')
-    ax4.grid(True, alpha=0.3)
-    ax4.legend()
-    
-    # Plot 5: Effective coil length vs Gap Length
-    ax5 = plt.subplot(3, 3, 5)
-    
-    effective_coil_lengths = []
-    total_gap_lengths = []
-    
-    for gap_length in gap_lengths:
-        if gap_length in all_sims and all_sims[gap_length] is not None:
-            sim = all_sims[gap_length]
-            total_gap = (sim.num_segments - 1) * gap_length * 1000  # mm
-            effective_coil = sim.segment_length * sim.num_segments * 1000  # mm
-            effective_coil_lengths.append(effective_coil)
-            total_gap_lengths.append(total_gap)
-        else:
-            effective_coil_lengths.append(np.nan)
-            total_gap_lengths.append(np.nan)
-    
-    ax5.plot(gap_mm, effective_coil_lengths, 'mo-', linewidth=2, markersize=8, label='Effective coil length')
-    ax5.plot(gap_mm, total_gap_lengths, 'yo-', linewidth=2, markersize=8, label='Total gap length')
-    
-    ax5.set_xlabel('Gap Length (mm)')
-    ax5.set_ylabel('Length (mm)')
-    ax5.set_title('Coil Geometry vs Gap Length')
-    ax5.grid(True, alpha=0.3)
-    ax5.legend()
-    
-    # Plot 6: EMF Efficiency (EMF per effective coil length)
-    ax6 = plt.subplot(3, 3, 6)
-    
-    emf_efficiency = []
-    for i, gap_length in enumerate(gap_lengths):
-        if (gap_length in all_results and all_results[gap_length] is not None and
-            not np.isnan(peak_to_peak_emfs[i]) and not np.isnan(effective_coil_lengths[i])):
-            efficiency = peak_to_peak_emfs[i] / (effective_coil_lengths[i] / 1000)  # mV per meter
-            emf_efficiency.append(efficiency)
-        else:
-            emf_efficiency.append(np.nan)
-    
-    ax6.plot(gap_mm, emf_efficiency, 'ko-', linewidth=2, markersize=8)
-    
-    # Add continuous coil reference
-    if 'continuous' in all_results and all_sims['continuous'] is not None:
-        cont_results = all_results['continuous']
-        cont_sim = all_sims['continuous']
-        cont_p2p = (np.max(cont_results['emf']) - np.min(cont_results['emf'])) * 1000
-        cont_efficiency = cont_p2p / cont_sim.L  # mV per meter
-        ax6.axhline(cont_efficiency, color='red', linestyle='--', alpha=0.7, 
-                   label=f'Continuous: {cont_efficiency:.1f} mV/m')
-    
-    ax6.set_xlabel('Gap Length (mm)')
-    ax6.set_ylabel('EMF Efficiency (mV/m of coil)')
-    ax6.set_title('EMF Efficiency vs Gap Length')
-    ax6.grid(True, alpha=0.3)
-    ax6.legend()
-    
-    # Plot 7: Power vs Gap Length
-    ax7 = plt.subplot(3, 3, 7)
-    
-    peak_powers = []
-    for i, gap_length in enumerate(gap_lengths):
-        if gap_length in all_results and all_results[gap_length] is not None:
-            results = all_results[gap_length]
-            sim = all_sims[gap_length]
-            power = results['emf']**2 / sim.resistance
-            peak_power = np.max(power) * 1e6  # μW
-            peak_powers.append(peak_power)
-        else:
-            peak_powers.append(np.nan)
-    
-    ax7.plot(gap_mm, peak_powers, 'ro-', linewidth=2, markersize=8)
-    
-    # Add continuous coil reference
-    if 'continuous' in all_results and all_sims['continuous'] is not None:
-        cont_results = all_results['continuous']
-        cont_sim = all_sims['continuous']
-        cont_power = cont_results['emf']**2 / cont_sim.resistance
-        cont_peak_power = np.max(cont_power) * 1e6
-        ax7.axhline(cont_peak_power, color='red', linestyle='--', alpha=0.7, 
-                   label=f'Continuous: {cont_peak_power:.1f} μW')
-    
-    ax7.set_xlabel('Gap Length (mm)')
-    ax7.set_ylabel('Peak Power (μW)')
-    ax7.set_title('Peak Power vs Gap Length')
-    ax7.grid(True, alpha=0.3)
-    ax7.legend()
-    
-    # Plot 8: Segment visualization for selected gap lengths
-    ax8 = plt.subplot(3, 3, 8)
-    
-    # Show geometry for a few representative gap lengths
-    representative_gaps = [gap_lengths[0], gap_lengths[len(gap_lengths)//2], gap_lengths[-1]]
-    y_positions = [0, 1, 2]
-    
-    for i, gap_length in enumerate(representative_gaps):
-        if gap_length in all_sims and all_sims[gap_length] is not None:
-            sim = all_sims[gap_length]
-            boundaries = sim.get_segment_boundaries()
-            y_pos = y_positions[i]
-            
-            # Draw coil segments
-            for j, (start, end) in enumerate(boundaries):
-                ax8.plot([start*1000, end*1000], [y_pos, y_pos], 'o-', linewidth=6, 
-                        markersize=8, alpha=0.7, 
-                        label=f'Gap: {gap_length*1000:.1f}mm' if j == 0 else "")
-            
-            # Draw gaps
-            for j in range(len(boundaries)-1):
-                gap_start = boundaries[j][1] * 1000
-                gap_end = boundaries[j+1][0] * 1000
-                ax8.plot([gap_start, gap_end], [y_pos, y_pos], '--', linewidth=2, alpha=0.5)
-    
-    ax8.set_xlabel('Position (mm)')
-    ax8.set_ylabel('Configuration')
-    ax8.set_title('Coil Segment Layouts')
-    ax8.set_yticks(y_positions)
-    ax8.set_yticklabels([f'{g*1000:.1f}mm' for g in representative_gaps])
-    ax8.legend()
-    ax8.grid(True, alpha=0.3)
-    
-    # Plot 9: Summary metrics
-    ax9 = plt.subplot(3, 3, 9)
-    
-    # Calculate relative performance vs continuous coil
-    if 'continuous' in all_results and all_results['continuous'] is not None:
-        cont_p2p = (np.max(all_results['continuous']['emf']) - 
-                   np.min(all_results['continuous']['emf'])) * 1000
-        
-        relative_performance = []
-        for p2p in peak_to_peak_emfs:
-            if not np.isnan(p2p):
-                relative_performance.append(p2p / cont_p2p)
-            else:
-                relative_performance.append(np.nan)
-        
-        ax9.plot(gap_mm, relative_performance, 'go-', linewidth=3, markersize=10)
-        ax9.axhline(1.0, color='red', linestyle='--', alpha=0.7, 
-                   label='Continuous coil performance')
-        
-        ax9.set_xlabel('Gap Length (mm)')
-        ax9.set_ylabel('Relative EMF Performance')
-        ax9.set_title('Performance vs Continuous Coil')
-        ax9.grid(True, alpha=0.3)
-        ax9.legend()
-        valid_performance = [p for p in relative_performance if not np.isnan(p)]
-        if valid_performance:
-            ax9.set_ylim(0, max(valid_performance) * 1.1)
-        else:
-            ax9.set_ylim(0, 1.1)
+    plt.xlabel('Time from interaction start (s)', fontsize=14)
+    plt.ylabel('Induced EMF (mV)', fontsize=14)
+    plt.title('EMF vs Time - Gap Length Comparison', fontsize=16)
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=12)
     
     plt.tight_layout()
     plt.savefig(os.path.join(plots_folder, 'gap_length_analysis.png'), 
                 dpi=300, bbox_inches='tight')
-    plt.show()
+    show_plot_with_message("EMF vs Time - Gap Length Comparison")
     
     # Print summary
     print(f"\nGap Length Analysis Summary:")
+    gap_mm = [g * 1000 for g in gap_lengths]
+    max_emfs = []
+    peak_to_peak_emfs = []
+    resistances = []
+    peak_powers = []
+    
+    for gap_length in gap_lengths:
+        if gap_length in all_results and all_results[gap_length] is not None:
+            results = all_results[gap_length]
+            sim = all_sims[gap_length]
+            max_emf = np.max(results['emf']) * 1000
+            min_emf = np.min(results['emf']) * 1000
+            peak_to_peak = max_emf - min_emf
+            power = np.max(results['emf']**2 / sim.resistance) * 1e6
+            
+            max_emfs.append(max_emf)
+            peak_to_peak_emfs.append(peak_to_peak)
+            resistances.append(sim.resistance * 1000)
+            peak_powers.append(power)
+        else:
+            max_emfs.append(0)
+            peak_to_peak_emfs.append(0)
+            resistances.append(0)
+            peak_powers.append(0)
+    
     print(f"{'Gap (mm)':<8} {'Max EMF (mV)':<12} {'P2P EMF (mV)':<12} {'Resistance (mΩ)':<15} {'Peak Power (μW)':<15}")
     print("-" * 70)
     
     for i, gap_length in enumerate(gap_lengths):
         if gap_length in all_results and all_results[gap_length] is not None:
             gap_mm_val = gap_length * 1000
-            max_emf = max_emfs[i] if i < len(max_emfs) else 0
-            p2p_emf = peak_to_peak_emfs[i] if i < len(peak_to_peak_emfs) else 0
-            resistance = resistances[i] if i < len(resistances) else 0
-            power = peak_powers[i] if i < len(peak_powers) else 0
+            max_emf = max_emfs[i]
+            p2p_emf = peak_to_peak_emfs[i]
+            resistance = resistances[i]
+            power = peak_powers[i]
             
             print(f"{gap_mm_val:<8.1f} {max_emf:<12.2f} {p2p_emf:<12.2f} {resistance:<15.2f} {power:<15.2f}")
     
@@ -2077,14 +1488,14 @@ def compare_segmented_vs_continuous_coils():
 
 def create_segmented_comparison_plots(segmented_results, continuous_results, 
                                     segmented_sim, continuous_sim):
-    """Create comparison plots between segmented and continuous coils."""
+    """Create simplified EMF vs Time comparison plot between segmented and continuous coils."""
     plots_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots')
     os.makedirs(plots_folder, exist_ok=True)
     
-    # Main comparison plot
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+    # Create single EMF vs Time comparison plot
+    plt.figure(figsize=(12, 8))
     
-    # Plot 1: EMF vs Time
+    # Plot EMF vs Time for both configurations
     for results, label, color, linestyle in [
         (segmented_results, 'Segmented (5 coils)', 'red', '-'),
         (continuous_results, 'Continuous', 'blue', '--')
@@ -2095,97 +1506,26 @@ def create_segmented_comparison_plots(segmented_results, continuous_results,
             time_focused = results['time'][mask]
             emf_focused = results['emf'][mask]
             time_shifted = time_focused - time_focused[0]
-            ax1.plot(time_shifted, emf_focused * 1000, color=color, linestyle=linestyle, 
+            plt.plot(time_shifted, emf_focused * 1000, color=color, linestyle=linestyle, 
                     linewidth=3, label=label)
     
-    ax1.set_xlabel('Time from interaction start (s)')
-    ax1.set_ylabel('Induced EMF (mV)')
-    ax1.set_title('EMF vs Time - Segmented vs Continuous')
-    ax1.grid(True, alpha=0.3)
-    ax1.legend()
+    plt.xlabel('Time from interaction start (s)', fontsize=14)
+    plt.ylabel('Induced EMF (mV)', fontsize=14)
+    plt.title('EMF vs Time - Segmented vs Continuous Coils', fontsize=16)
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=12)
     
-    # Plot 2: EMF vs Position
-    for results, label, color, linestyle in [
-        (segmented_results, 'Segmented', 'red', '-'),
-        (continuous_results, 'Continuous', 'blue', '--')
-    ]:
-        position_mm = results['position'] * 1000
-        mask = (np.abs(position_mm) <= 750)  # Focus on ±75cm
-        ax2.plot(position_mm[mask], results['emf'][mask] * 1000, 
-                color=color, linestyle=linestyle, linewidth=3, label=label)
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_folder, 'segmented_vs_continuous.png'), 
+                dpi=300, bbox_inches='tight')
+    show_plot_with_message("EMF vs Time - Segmented vs Continuous Comparison")
     
-    # Add segment boundaries for segmented coil
-    boundaries = segmented_sim.get_segment_boundaries()
-    for i, (start, end) in enumerate(boundaries):
-        ax2.axvspan(start*1000, end*1000, alpha=0.2, color='red', 
-                   label='Coil segments' if i == 0 else "")
-    
-    ax2.set_xlabel('Position from center (mm)')
-    ax2.set_ylabel('Induced EMF (mV)')
-    ax2.set_title('EMF vs Position')
-    ax2.grid(True, alpha=0.3)
-    ax2.legend()
-    
-    # Plot 3: Peak values comparison
+    # Print summary
     seg_max = np.max(segmented_results['emf']) * 1000
     seg_min = np.min(segmented_results['emf']) * 1000
     cont_max = np.max(continuous_results['emf']) * 1000
     cont_min = np.min(continuous_results['emf']) * 1000
     
-    categories = ['Max EMF', '|Min EMF|', 'Peak-to-Peak']
-    segmented_values = [seg_max, abs(seg_min), seg_max - seg_min]
-    continuous_values = [cont_max, abs(cont_min), cont_max - cont_min]
-    
-    x = np.arange(len(categories))
-    width = 0.35
-    
-    ax3.bar(x - width/2, segmented_values, width, label='Segmented', alpha=0.7, color='red')
-    ax3.bar(x + width/2, continuous_values, width, label='Continuous', alpha=0.7, color='blue')
-    
-    ax3.set_xlabel('EMF Metric')
-    ax3.set_ylabel('EMF (mV)')
-    ax3.set_title('EMF Magnitude Comparison')
-    ax3.set_xticks(x)
-    ax3.set_xticklabels(categories)
-    ax3.legend()
-    ax3.grid(True, alpha=0.3)
-    
-    # Plot 4: Coil geometry visualization
-    ax4.set_xlim(-600, 600)
-    ax4.set_ylim(-0.5, 1.5)
-    
-    # Draw segmented coil
-    for i, (start, end) in enumerate(boundaries):
-        ax4.plot([start*1000, end*1000], [1, 1], 'ro-', linewidth=8, 
-                markersize=10, alpha=0.7, label='Coil segments' if i == 0 else "")
-    
-    # Draw gaps
-    for i in range(len(boundaries)-1):
-        gap_start = boundaries[i][1] * 1000
-        gap_end = boundaries[i+1][0] * 1000
-        ax4.plot([gap_start, gap_end], [1, 1], 'r--', linewidth=2, alpha=0.5,
-                label='Gaps' if i == 0 else "")
-    
-    # Draw continuous coil
-    cont_start = -continuous_sim.L/2 * 1000
-    cont_end = continuous_sim.L/2 * 1000
-    ax4.plot([cont_start, cont_end], [0, 0], 'b-', linewidth=8, alpha=0.7, 
-            label='Continuous coil')
-    
-    ax4.set_xlabel('Position (mm)')
-    ax4.set_ylabel('Coil Type')
-    ax4.set_title('Coil Geometry Comparison')
-    ax4.set_yticks([0, 1])
-    ax4.set_yticklabels(['Continuous', 'Segmented'])
-    ax4.legend()
-    ax4.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(plots_folder, 'segmented_vs_continuous.png'), 
-                dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    # Print summary
     print(f"\nComparison Summary:")
     print(f"Segmented coil - Max EMF: {seg_max:.2f} mV, Peak-to-Peak: {seg_max-seg_min:.2f} mV")
     print(f"Continuous coil - Max EMF: {cont_max:.2f} mV, Peak-to-Peak: {cont_max-cont_min:.2f} mV")
@@ -2272,17 +1612,14 @@ def compare_coil_lengths():
 
 def create_coil_length_overlay_plots(all_results, all_sims, lengths_to_compare, colors, line_styles):
     """
-    Create overlay plots comparing EMF curves for different coil lengths.
+    Create EMF vs Time overlay plot comparing different coil lengths.
     """
     # Create plots folder
     plots_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots')
     os.makedirs(plots_folder, exist_ok=True)
     
-    # Create figure with multiple subplots
-    fig = plt.figure(figsize=(18, 12))
-    
-    # Plot 1: EMF vs Time (Focused on interaction periods)
-    ax1 = plt.subplot(2, 3, 1)
+    # Create single EMF vs Time overlay plot
+    plt.figure(figsize=(12, 8))
     
     for i, length in enumerate(lengths_to_compare):
         results = all_results[length]
@@ -2316,125 +1653,16 @@ def create_coil_length_overlay_plots(all_results, all_sims, lengths_to_compare, 
         plt.plot(time_shifted, emf_focused * 1000, color=colors[i], linestyle=line_styles[i], 
                 linewidth=3, label=f'L = {length} m')
     
-    plt.xlabel('Time from interaction start (s)')
-    plt.ylabel('Induced EMF (mV)')
-    plt.title('EMF vs Time - Coil Length Comparison')
+    plt.xlabel('Time from interaction start (s)', fontsize=14)
+    plt.ylabel('Induced EMF (mV)', fontsize=14)
+    plt.title('EMF vs Time - Coil Length Comparison', fontsize=16)
     plt.grid(True, alpha=0.3)
-    plt.legend()
-    
-    # Plot 2: EMF vs Position (relative to spring)
-    ax2 = plt.subplot(2, 3, 2)
-    
-    for i, length in enumerate(lengths_to_compare):
-        results = all_results[length]
-        sim = all_sims[length]
-        
-        # Convert position to fraction of spring length from top
-        spring_top = sim.L/2
-        position_relative = (spring_top - results['position']) / sim.L
-        
-        # Only plot when magnet is near the spring
-        mask = (position_relative >= -0.5) & (position_relative <= 1.5)
-        
-        plt.plot(position_relative[mask], results['emf'][mask] * 1000, 
-                color=colors[i], linestyle=line_styles[i], linewidth=2, 
-                label=f'L = {length} m')
-    
-    plt.xlabel('Position (fraction of spring length from top)')
-    plt.ylabel('Induced EMF (mV)')
-    plt.title('EMF vs Relative Position')
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    
-    # Add coil boundaries
-    if hasattr(sim, 'L'):
-        spring_extent = sim.L/2 * 1000  # mm
-        plt.axvline(spring_extent, color=colors[i], linestyle=':', alpha=0.5)
-        plt.axvline(-spring_extent, color=colors[i], linestyle=':', alpha=0.5)
-    
-    # Plot 3: Peak EMF comparison
-    ax3 = plt.subplot(2, 3, 3)
-    
-    seg_max = np.max(all_results[length]['emf']) * 1000
-    seg_min = np.min(all_results[length]['emf']) * 1000
-    cont_max = np.max(all_results[length]['emf']) * 1000
-    cont_min = np.min(all_results[length]['emf']) * 1000
-    
-    x_pos = [0, 1]
-    max_emfs = [seg_max, cont_max]
-    min_emfs = [abs(seg_min), abs(cont_min)]
-    peak_to_peak = [seg_max - seg_min, cont_max - cont_min]
-    
-    width = 0.25
-    plt.bar([x - width for x in x_pos], max_emfs, width, label='Max EMF', alpha=0.7, color='orange')
-    plt.bar(x_pos, min_emfs, width, label='|Min EMF|', alpha=0.7, color='purple')
-    plt.bar([x + width for x in x_pos], peak_to_peak, width, label='Peak-to-Peak', alpha=0.7, color='green')
-    
-    plt.xlabel('Coil Type')
-    plt.ylabel('EMF (mV)')
-    plt.title('EMF Magnitude Comparison')
-    plt.xticks(x_pos, ['Segmented', 'Continuous'])
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 4: Power comparison
-    ax4 = plt.subplot(2, 3, 4)
-    
-    seg_power = all_results[length]['emf']**2 / sim.resistance
-    cont_power = all_results[length]['emf']**2 / sim.resistance
-    
-    seg_peak_power = np.max(seg_power) * 1e6  # μW
-    cont_peak_power = np.max(cont_power) * 1e6
-    
-    seg_avg_power = np.mean(seg_power) * 1e6
-    cont_avg_power = np.mean(cont_power) * 1e6
-    
-    x_pos = [0, 1]
-    peak_powers = [seg_peak_power, cont_peak_power]
-    avg_powers = [seg_avg_power, cont_avg_power]
-    
-    width = 0.35
-    plt.bar([x - width/2 for x in x_pos], peak_powers, width, label='Peak Power', alpha=0.7)
-    plt.bar([x + width/2 for x in x_pos], avg_powers, width, label='Avg Power', alpha=0.7)
-    
-    plt.xlabel('Coil Type')
-    plt.ylabel('Power (μW)')
-    plt.title('Power Generation Comparison')
-    plt.xticks(x_pos, ['Segmented', 'Continuous'])
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 5: Resistance comparison
-    ax5 = plt.subplot(2, 3, 5)
-    
-    resistances = [sim.resistance * 1000, sim.resistance * 1000]
-    plt.bar(x_pos, resistances, color=['red', 'blue'], alpha=0.7)
-    plt.xlabel('Coil Type')
-    plt.ylabel('Resistance (mΩ)')
-    plt.title('Coil Resistance Comparison')
-    plt.xticks(x_pos, ['Segmented', 'Continuous'])
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 6: Coil geometry visualization
-    ax6 = plt.subplot(2, 3, 6)
-    
-    # Draw coil
-    if hasattr(sim, 'L'):
-        cont_start = -sim.L/2 * 1000
-        cont_end = sim.L/2 * 1000
-        plt.plot([cont_start, cont_end], [0, 0], 'b-', linewidth=8, alpha=0.7, label='Continuous coil')
-    
-    plt.ylim(-0.5, 1.5)
-    plt.xlabel('Position (mm)')
-    plt.title('Coil Geometry Comparison')
-    plt.yticks([0, 1], ['Continuous', 'Segmented'])
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=12)
     
     plt.tight_layout()
     plt.savefig(os.path.join(plots_folder, 'coil_length_comparison.png'), 
                 dpi=300, bbox_inches='tight')
-    plt.show()
+    show_plot_with_message("EMF vs Time - Coil Length Comparison")
 
 
 def print_coil_comparison_summary(segmented_results, continuous_results,
@@ -2471,27 +1699,13 @@ def print_coil_comparison_summary(segmented_results, continuous_results,
     print(f"  Ratio: {seg_resistance/cont_resistance:.3f}")
     
     # Power comparison
-    seg_power = segmented_results['emf']**2 / segmented_sim.resistance
-    cont_power = continuous_results['emf']**2 / continuous_sim.resistance
+    seg_peak_power = seg_peak_to_peak**2 / seg_resistance * 1000  # μW
+    cont_peak_power = cont_peak_to_peak**2 / cont_resistance * 1000
     
-    seg_peak_power = np.max(seg_power) * 1e6
-    cont_peak_power = np.max(cont_power) * 1e6
-    
-    print(f"\nPower Comparison:")
-    print(f"  Segmented peak power: {seg_peak_power:.2f} μW")
-    print(f"  Continuous peak power: {cont_peak_power:.2f} μW")
+    print(f"\nPeak Power Comparison:")
+    print(f"  Segmented coil: {seg_peak_power:.2f} μW")
+    print(f"  Continuous coil: {cont_peak_power:.2f} μW")
     print(f"  Ratio: {seg_peak_power/cont_peak_power:.3f}")
-    
-    # Geometry summary
-    if hasattr(segmented_sim, 'segment_centers'):
-        print(f"\nGeometry Summary:")
-        print(f"  Segmented coil:")
-        print(f"    - {segmented_sim.num_segments} segments of {segmented_sim.segment_length*1000:.1f} mm each")
-        print(f"    - {segmented_sim.gap_length*1000:.1f} mm gaps between segments")
-        print(f"    - {segmented_sim.turns_per_segment} turns per segment")
-        print(f"  Continuous coil:")
-        print(f"    - Single coil of {continuous_sim.L*1000:.1f} mm")
-        print(f"    - {continuous_sim.N} total turns")
 
 
 def show_emf_time_plot_only():
@@ -2804,42 +2018,1511 @@ def run_gap_length_simulations(gap_lengths):
     return all_results, all_sims
 
 
-if __name__ == "__main__":
-    import sys
+def compare_initial_velocities():
+    """
+    Compare the effects of different initial velocities on electromagnetic induction.
+    Run simulations with various initial velocities and create an EMF vs time overlay plot.
+    """
+    print("Starting Initial Velocity Comparison Analysis")
+    print("=" * 60)
     
-    # Check command line arguments for different analysis types
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "length_analysis":
-            print("Running comprehensive coil length analysis...")
-            results = analyze_coil_length_effects()
-        elif sys.argv[1] == "compare":
-            print("Running coil length comparison...")
-            results = compare_coil_lengths()
-        elif sys.argv[1] == "segmented":
-            print("Running segmented vs continuous coil comparison...")
-            results = compare_segmented_vs_continuous_coils()
-        elif sys.argv[1] == "gap_analysis":
-            print("Running gap length analysis...")
-            results = analyze_gap_length_effects()
-        elif sys.argv[1] == "emf_plot":
-            print("Generating EMF vs time plot only...")
-            results = show_emf_time_plot_only()
+    # Define different initial velocities to compare (m/s)
+    # Negative values represent downward velocities
+    velocities = [-5.0, -2.5, -1.0, 0.0, 1.0, 2.5, 5.0]
+    
+    # Define colors using a colormap for visual distinction
+    colors = plt.cm.viridis(np.linspace(0, 1, len(velocities)))
+    
+    # Create plots folder if it doesn't exist
+    plots_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'plots')
+    os.makedirs(plots_folder, exist_ok=True)
+    
+    # Store simulation results - use integer indices instead of floating point values
+    all_results = []
+    
+    # Set up standard simulation parameters
+    magnetic_dipole_moment = 2.0  # A·m²
+    spring_radius = 0.02          # 2 cm
+    spring_length = 0.3           # 30 cm
+    num_turns = 50                # 50 turns
+    wire_radius = 0.001           # 1 mm
+    resistivity = 1.7e-8          # Copper
+    magnet_mass = 0.01            # 10 g
+    
+    # For consistent comparison, set initial position above the coil
+    initial_position = -spring_length/2 - 0.05  # 5cm above the spring
+    
+    print(f"Running simulations with different initial velocities...")
+    
+    # Run simulations for each initial velocity
+    for i, velocity in enumerate(velocities):
+        print(f"  Simulating initial velocity: {velocity:.1f} m/s...", end=" ")
+        
+        # Create simulation instance
+        sim = MagnetThroughSpringSimulation(
+            magnetic_dipole_moment=magnetic_dipole_moment,
+            spring_radius=spring_radius,
+            spring_length=spring_length,
+            num_turns=num_turns,
+            wire_radius=wire_radius,
+            resistivity=resistivity,
+            magnet_mass=magnet_mass,
+            gravity=9.81
+        )
+        
+        # Run simulation with this initial velocity
+        # We need to modify the equation_of_motion method to support non-zero initial velocity
+        # First, let's create a custom run_simulation function to handle different initial conditions
+        
+        # Time array
+        duration = 1.0
+        dt = 0.0001
+        t = np.arange(0, duration, dt)
+        
+        # Initial conditions with custom velocity
+        initial_state = [initial_position, velocity]
+        
+        # Solve differential equation
+        solution = odeint(sim.equation_of_motion, initial_state, t)
+        positions = solution[:, 0]
+        velocities_result = solution[:, 1]
+        
+        # Calculate EMF and current for each time step
+        emf_values = []
+        current_values = []
+        flux_values = []
+        
+        for pos, vel in zip(positions, velocities_result):
+            emf = sim.induced_emf(pos, vel)
+            current = emf / sim.resistance
+            flux = sim.total_magnetic_flux(pos)
+            
+            emf_values.append(emf)
+            current_values.append(current)
+            flux_values.append(flux)
+        
+        # Convert to numpy arrays
+        emf_values = np.array(emf_values)
+        current_values = np.array(current_values)
+        flux_values = np.array(flux_values)
+        
+        # Create results dictionary
+        results = {
+            'time': t,
+            'position': positions,
+            'velocity': velocities_result,
+            'emf': emf_values,
+            'current': current_values,
+            'flux': flux_values,
+            'resistance': sim.resistance,
+            'initial_velocity': velocity  # Store the exact initial velocity value
+        }
+        
+        # Store results in list instead of dictionary to avoid floating point key issues
+        all_results.append(results)
+        
+        # Print max EMF
+        max_emf = np.max(np.abs(emf_values)) * 1000  # mV
+        print(f"Max EMF: {max_emf:.2f} mV ✓")
+    
+    # Create the EMF vs time overlay plot
+    print("\nGenerating EMF vs Time overlay plot (positive initial velocities only)...")
+    
+    # Create scientific figure
+    plt.figure(figsize=(12, 8), dpi=150, facecolor='white')
+    
+    # Set scientific font properties
+    plt.rcParams.update({
+        'font.family': 'serif',
+        'font.serif': ['DejaVu Serif', 'Times New Roman', 'Times', 'serif'],
+        'mathtext.fontset': 'dejavuserif',
+        'axes.labelsize': 14,
+        'axes.titlesize': 15,
+        'xtick.labelsize': 12,
+        'ytick.labelsize': 12,
+        'legend.fontsize': 11
+    })
+    
+    # Plot EMF vs time for positive initial velocities only (v0 ≥ 0)
+    for i, velocity in enumerate(velocities):
+        if velocity < 0:  # Skip negative velocities
+            continue
+            
+        results = all_results[i]  # Use index instead of velocity as key
+        
+        # Find when magnet interacts with spring
+        spring_top = spring_length/2
+        spring_bottom = -spring_length/2
+        spring_buffer = 0.05  # 5 cm buffer
+        
+        # Identify interaction region
+        mask = (results['position'] <= spring_top + spring_buffer) & (results['position'] >= spring_bottom - spring_buffer)
+        
+        if np.any(mask):
+            # Extract data within the interaction region
+            time = results['time'][mask]
+            emf = results['emf'][mask]
+            
+            # Align all curves to start at t=0 for the interaction period
+            time_shifted = time - time[0]
+            
+            # Plot with scientific styling
+            label = f"v₀ = {velocity:.1f} m/s"
+            if velocity == 0:
+                label = "v₀ = 0 (free fall)"
+                
+            plt.plot(time_shifted, emf * 1000, color=colors[i], 
+                    linewidth=2.5, label=label)
+    
+    # Add axis labels with LaTeX formatting
+    plt.xlabel(r'Time $t$ [s]', fontsize=15)
+    plt.ylabel(r'Induced EMF $\mathcal{E}$ [mV]', fontsize=15)
+    
+    # Add title
+    plt.title('Effect of Initial Velocity on Induced EMF (v₀ ≥ 0)', fontsize=16, pad=20)
+    
+    # Add grid
+    plt.grid(True, alpha=0.3, linestyle='--')
+    
+    # Add legend
+    legend = plt.legend(fontsize=12, loc='best', frameon=True, framealpha=0.7,
+                       edgecolor='gray', fancybox=False)
+    
+    # Scientific tick formatting
+    plt.tick_params(axis='both', which='major', direction='in', 
+                   length=5, width=1.0, bottom=True, top=True, left=True, right=True)
+    plt.tick_params(axis='both', which='minor', direction='in', 
+                   length=3, width=0.5, bottom=True, top=True, left=True, right=True)
+    
+    # Add minor ticks
+    plt.minorticks_on()
+    
+    # Add box around the plot
+    plt.box(True)
+    
+    # Tight layout
+    plt.tight_layout()
+    
+    # Save figure
+    filename = 'initial_velocity_comparison_positive.png'
+    filepath = os.path.join(plots_folder, filename)
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    
+    # Also save as PDF for publication
+    pdf_filename = 'initial_velocity_comparison_positive.pdf'
+    pdf_filepath = os.path.join(plots_folder, pdf_filename)
+    plt.savefig(pdf_filepath, bbox_inches='tight', format='pdf')
+    
+    plt.show()
+    
+    # Print summary and statistics
+    print("\nInitial Velocity Comparison Summary:")
+    print("=" * 60)
+    print(f"{'Velocity (m/s)':<15} {'Max EMF (mV)':<15} {'Peak-to-Peak (mV)':<20} {'Peak Time (s)':<15}")
+    print("-" * 65)
+    
+    for i, velocity in enumerate(velocities):
+        results = all_results[i]  # Use index instead of velocity value
+        emf = results['emf']
+        time = results['time']
+        
+        max_emf = np.max(emf) * 1000
+        min_emf = np.min(emf) * 1000
+        peak_to_peak = max_emf - min_emf
+        max_idx = np.argmax(np.abs(emf))
+        peak_time = time[max_idx]
+        
+        print(f"{velocity:<15.1f} {max_emf:<15.2f} {peak_to_peak:<20.2f} {peak_time:<15.4f}")
+    
+    print("\nObservations:")
+    print("1. Higher initial velocities (magnitude) produce larger EMF peaks")
+    print("2. The direction of the initial velocity affects the EMF waveform shape")
+    print("3. Negative velocities (downward) produce EMF peaks faster")
+    
+    print(f"\nPlots saved as:")
+    print(f"  PNG: {filepath}")
+    print(f"  PDF: {pdf_filepath}")
+    
+    return all_results
+
+
+def simulate_single_coil(magnetic_dipole_moment=2.0, spring_radius=0.02, spring_length=1.0, 
+                        num_turns=50, wire_radius=0.001, resistivity=1.7e-8, 
+                        magnet_mass=0.01, gravity=9.81, initial_velocity=0.0, 
+                        duration=1.0, dt=0.0001, save_data=True, save_plots=True):
+    """
+    Simulate a single coil with a magnet falling through it and plot EMF vs time.
+    
+    Args:
+        magnetic_dipole_moment: Magnetic dipole moment in A·m²
+        spring_radius: Radius of the spring coil in meters
+        spring_length: Length of the spring in meters
+        num_turns: Number of turns in the spring
+        wire_radius: Radius of the wire forming the spring
+        resistivity: Electrical resistivity of the wire material (Ω·m)
+        magnet_mass: Mass of the magnet in kg
+        gravity: Gravitational acceleration in m/s²
+        initial_velocity: Initial velocity of the magnet (m/s)
+        duration: Simulation duration in seconds
+        dt: Time step for simulation
+        save_data: Whether to save simulation data to CSV
+        save_plots: Whether to save plots to files
+        
+    Returns:
+        Dictionary containing simulation results
+    """
+    print("=== Single Coil Simulation ===")
+    print(f"Simulating magnet through single coil...")
+    print(f"Initial velocity: {initial_velocity} m/s")
+    print(f"Duration: {duration} s")
+    
+    # Create simulation object
+    sim = MagnetThroughSpringSimulation(
+        magnetic_dipole_moment=magnetic_dipole_moment,
+        spring_radius=spring_radius,
+        spring_length=spring_length,
+        num_turns=num_turns,
+        wire_radius=wire_radius,
+        resistivity=resistivity,
+        magnet_mass=magnet_mass,
+        gravity=gravity
+    )
+    
+    # Set initial conditions
+    # Start magnet well above the coil
+    initial_position = -spring_length * 2
+    initial_conditions = [initial_position, initial_velocity]
+    
+    # Run simulation
+    print("Running simulation...")
+    results = sim.run_simulation(duration=duration, dt=dt)
+    
+    # Extract data
+    time = results['time']
+    position = results['position']
+    velocity = results['velocity']
+    emf = results['emf']
+    current = results['current']
+    flux = results['flux']
+    
+    # Calculate some metrics
+    max_emf = np.max(np.abs(emf)) * 1000  # mV
+    min_emf = np.min(emf) * 1000  # mV
+    max_emf_pos = np.max(emf) * 1000  # mV
+    max_current = np.max(np.abs(current)) * 1000  # mA
+    
+    print(f"\nSimulation Results:")
+    print(f"  Maximum EMF magnitude: {max_emf:.2f} mV")
+    print(f"  Maximum positive EMF: {max_emf_pos:.2f} mV")
+    print(f"  Minimum EMF: {min_emf:.2f} mV")
+    print(f"  Maximum current: {max_current:.2f} mA")
+    print(f"  Coil resistance: {sim.resistance*1000:.2f} mΩ")
+    
+    # Create plots
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    fig.suptitle('Single Coil Simulation Results', fontsize=16, fontweight='bold')
+    
+    # EMF vs Time
+    axes[0, 0].plot(time, emf * 1000, 'b-', linewidth=2, label='EMF')
+    axes[0, 0].set_xlabel('Time (s)')
+    axes[0, 0].set_ylabel('EMF (mV)')
+    axes[0, 0].set_title('Induced EMF vs Time')
+    axes[0, 0].grid(True, alpha=0.3)
+    axes[0, 0].legend()
+    
+    # EMF vs Position
+    axes[0, 1].plot(position * 1000, emf * 1000, 'r-', linewidth=2, label='EMF')
+    axes[0, 1].set_xlabel('Position (mm)')
+    axes[0, 1].set_ylabel('EMF (mV)')
+    axes[0, 1].set_title('Induced EMF vs Position')
+    axes[0, 1].grid(True, alpha=0.3)
+    axes[0, 1].legend()
+    
+    # Add coil boundaries to position plot
+    coil_start = -spring_length/2 * 1000
+    coil_end = spring_length/2 * 1000
+    axes[0, 1].axvline(coil_start, color='gray', linestyle='--', alpha=0.7, label='Coil boundaries')
+    axes[0, 1].axvline(coil_end, color='gray', linestyle='--', alpha=0.7)
+    axes[0, 1].legend()
+    
+    # Current vs Time
+    axes[1, 0].plot(time, current * 1000, 'g-', linewidth=2, label='Current')
+    axes[1, 0].set_xlabel('Time (s)')
+    axes[1, 0].set_ylabel('Current (mA)')
+    axes[1, 0].set_title('Induced Current vs Time')
+    axes[1, 0].grid(True, alpha=0.3)
+    axes[1, 0].legend()
+    
+    # Position and Velocity vs Time
+    ax_pos = axes[1, 1]
+    ax_vel = ax_pos.twinx()
+    
+    line1 = ax_pos.plot(time, position * 1000, 'orange', linewidth=2, label='Position')
+    line2 = ax_vel.plot(time, velocity, 'purple', linewidth=2, label='Velocity')
+    
+    ax_pos.set_xlabel('Time (s)')
+    ax_pos.set_ylabel('Position (mm)', color='orange')
+    ax_vel.set_ylabel('Velocity (m/s)', color='purple')
+    ax_pos.set_title('Magnet Position and Velocity vs Time')
+    ax_pos.grid(True, alpha=0.3)
+    
+    # Combine legends
+    lines = line1 + line2
+    labels = [l.get_label() for l in lines]
+    ax_pos.legend(lines, labels, loc='upper right')
+    
+    plt.tight_layout()
+    
+    if save_plots:
+        # Create output directory
+        os.makedirs('single_coil_output', exist_ok=True)
+        
+        plt.savefig('single_coil_output/single_coil_simulation.png', dpi=150, bbox_inches='tight')
+        print(f"Plot saved to: single_coil_output/single_coil_simulation.png")
+    
+    plt.show()
+    
+    # Create a focused EMF vs Time plot
+    plt.figure(figsize=(10, 6))
+    plt.plot(time, emf * 1000, 'b-', linewidth=2, label='Induced EMF')
+    plt.xlabel('Time (s)', fontsize=12)
+    plt.ylabel('EMF (mV)', fontsize=12)
+    plt.title('Induced EMF vs Time - Single Coil', fontsize=14, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=11)
+    
+    # Add text box with key parameters
+    textstr = f'Coil Length: {spring_length*1000:.0f} mm\nTurns: {num_turns}\nRadius: {spring_radius*1000:.1f} mm\nResistance: {sim.resistance*1000:.1f} mΩ'
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+    plt.text(0.02, 0.98, textstr, transform=plt.gca().transAxes, fontsize=10,
+             verticalalignment='top', bbox=props)
+    
+    plt.tight_layout()
+    
+    if save_plots:
+        plt.savefig('single_coil_output/emf_vs_time_focused.png', dpi=150, bbox_inches='tight')
+        print(f"EMF plot saved to: single_coil_output/emf_vs_time_focused.png")
+    
+    plt.show()
+    
+    # Save data if requested
+    if save_data:
+        os.makedirs('single_coil_output', exist_ok=True)
+        
+        # Create DataFrame
+        data_df = pd.DataFrame({
+            'Time_s': time,
+            'Position_mm': position * 1000,
+            'Velocity_ms': velocity,
+            'EMF_mV': emf * 1000,
+            'Current_mA': current * 1000,
+            'MagneticFlux_Wb': flux
+        })
+        
+        # Save to CSV
+        filename = 'single_coil_output/single_coil_data.csv'
+        data_df.to_csv(filename, index=False)
+        print(f"Data saved to: {filename}")
+        
+        # Save parameters
+        params_filename = 'single_coil_output/simulation_parameters.txt'
+        with open(params_filename, 'w') as f:
+            f.write("Single Coil Simulation Parameters:\n")
+            f.write("=====================================\n")
+            f.write(f"Magnetic dipole moment: {magnetic_dipole_moment} A·m²\n")
+            f.write(f"Spring radius: {spring_radius*1000:.1f} mm\n")
+            f.write(f"Spring length: {spring_length*1000:.1f} mm\n")
+            f.write(f"Number of turns: {num_turns}\n")
+            f.write(f"Wire radius: {wire_radius*1000:.2f} mm\n")
+            f.write(f"Resistivity: {resistivity:.2e} Ω·m\n")
+            f.write(f"Magnet mass: {magnet_mass*1000:.1f} g\n")
+            f.write(f"Gravity: {gravity:.2f} m/s²\n")
+            f.write(f"Initial velocity: {initial_velocity} m/s\n")
+            f.write(f"Simulation duration: {duration} s\n")
+            f.write(f"Time step: {dt} s\n")
+            f.write(f"\nCalculated Properties:\n")
+            f.write(f"Wire length: {sim.wire_length*1000:.1f} mm\n")
+            f.write(f"Total resistance: {sim.resistance*1000:.2f} mΩ\n")
+            f.write(f"Pitch: {sim.pitch*1000:.2f} mm\n")
+            f.write(f"\nResults:\n")
+            f.write(f"Maximum EMF magnitude: {max_emf:.2f} mV\n")
+            f.write(f"Maximum positive EMF: {max_emf_pos:.2f} mV\n")
+            f.write(f"Minimum EMF: {min_emf:.2f} mV\n")
+            f.write(f"Maximum current: {max_current:.2f} mA\n")
+        
+        print(f"Parameters saved to: {params_filename}")
+    
+    # Return results dictionary
+    return {
+        'time': time,
+        'position': position,
+        'velocity': velocity,
+        'emf': emf,
+        'current': current,
+        'flux': flux,
+        'simulation': sim,
+        'max_emf_mv': max_emf,
+        'min_emf_mv': min_emf,
+        'max_current_ma': max_current
+    }
+
+
+def run_single_coil_example():
+    """
+    Run an example single coil simulation with default parameters.
+    """
+    print("Running single coil example simulation...")
+    
+    # Run simulation with default parameters
+    results = simulate_single_coil(
+        spring_length=0.1,      # 10 cm coil
+        num_turns=100,          # 100 turns
+        spring_radius=0.015,    # 15 mm radius
+        initial_velocity=0.0,   # Drop from rest
+        duration=0.5,           # 0.5 second simulation
+        save_data=True,
+        save_plots=True
+    )
+    
+    print("Single coil simulation completed!")
+    return results
+
+
+class TwoStackedCoilsSimulation:
+    """
+    Simulates a magnetic dipole falling through two stacked coils.
+    Each coil can have different properties and generates separate EMF signals.
+    """
+    
+    def __init__(self, 
+                 # Coil 1 parameters (top coil)
+                 coil1_radius=0.02, coil1_length=0.5, coil1_turns=50, 
+                 coil1_wire_radius=0.001, coil1_resistivity=1.7e-8,
+                 # Coil 2 parameters (bottom coil)
+                 coil2_radius=0.02, coil2_length=0.5, coil2_turns=50,
+                 coil2_wire_radius=0.001, coil2_resistivity=1.7e-8,
+                 # Gap between coils
+                 gap_between_coils=0.05,
+                 # Magnet parameters
+                 magnetic_dipole_moment=2.0, magnet_mass=0.01, gravity=9.81):
+        """
+        Initialize two stacked coils simulation.
+        
+        Args:
+            coil1_radius: Radius of top coil in meters
+            coil1_length: Length of top coil in meters
+            coil1_turns: Number of turns in top coil
+            coil1_wire_radius: Wire radius for top coil
+            coil1_resistivity: Wire resistivity for top coil
+            coil2_radius: Radius of bottom coil in meters
+            coil2_length: Length of bottom coil in meters
+            coil2_turns: Number of turns in bottom coil
+            coil2_wire_radius: Wire radius for bottom coil
+            coil2_resistivity: Wire resistivity for bottom coil
+            gap_between_coils: Gap between the two coils in meters
+            magnetic_dipole_moment: Magnetic dipole moment in A·m²
+            magnet_mass: Mass of the magnet in kg
+            gravity: Gravitational acceleration in m/s²
+        """
+        # Create two separate coil simulations
+        self.coil1 = MagnetThroughSpringSimulation(
+            magnetic_dipole_moment=magnetic_dipole_moment,
+            spring_radius=coil1_radius,
+            spring_length=coil1_length,
+            num_turns=coil1_turns,
+            wire_radius=coil1_wire_radius,
+            resistivity=coil1_resistivity,
+            magnet_mass=magnet_mass,
+            gravity=gravity
+        )
+        
+        self.coil2 = MagnetThroughSpringSimulation(
+            magnetic_dipole_moment=magnetic_dipole_moment,
+            spring_radius=coil2_radius,
+            spring_length=coil2_length,
+            num_turns=coil2_turns,
+            wire_radius=coil2_wire_radius,
+            resistivity=coil2_resistivity,
+            magnet_mass=magnet_mass,
+            gravity=gravity
+        )
+        
+        self.gap = gap_between_coils
+        self.mass = magnet_mass
+        self.g = gravity
+        
+        # Calculate coil positions
+        # Coil 1 (top) centered at z = +coil1_length/2 + gap/2
+        # Coil 2 (bottom) centered at z = -coil2_length/2 - gap/2
+        self.coil1_center = coil1_length/2 + gap_between_coils/2
+        self.coil2_center = -coil2_length/2 - gap_between_coils/2
+        
+        print(f"\nTwo Stacked Coils Configuration:")
+        print(f"Coil 1 (Top):")
+        print(f"  Center position: {self.coil1_center*1000:.1f} mm")
+        print(f"  Range: {(self.coil1_center - coil1_length/2)*1000:.1f} to {(self.coil1_center + coil1_length/2)*1000:.1f} mm")
+        print(f"  Turns: {coil1_turns}, Resistance: {self.coil1.resistance*1000:.2f} mΩ")
+        print(f"Coil 2 (Bottom):")
+        print(f"  Center position: {self.coil2_center*1000:.1f} mm")
+        print(f"  Range: {(self.coil2_center - coil2_length/2)*1000:.1f} to {(self.coil2_center + coil2_length/2)*1000:.1f} mm")
+        print(f"  Turns: {coil2_turns}, Resistance: {self.coil2.resistance*1000:.2f} mΩ")
+        print(f"Gap between coils: {gap_between_coils*1000:.1f} mm")
+    
+    def get_coil1_emf(self, z_magnet, velocity):
+        """Calculate EMF in coil 1 based on magnet position relative to coil 1 center."""
+        z_relative_to_coil1 = z_magnet - self.coil1_center
+        return self.coil1.induced_emf(z_relative_to_coil1, velocity)
+    
+    def get_coil2_emf(self, z_magnet, velocity):
+        """Calculate EMF in coil 2 based on magnet position relative to coil 2 center."""
+        z_relative_to_coil2 = z_magnet - self.coil2_center
+        return self.coil2.induced_emf(z_relative_to_coil2, velocity)
+    
+    def equation_of_motion(self, state, t):
+        """
+        Differential equation for magnet motion through two stacked coils.
+        Both coils contribute to the magnetic force on the magnet.
+        """
+        z_pos, z_vel = state
+        
+        # Calculate EMF and current in both coils
+        emf1 = self.get_coil1_emf(z_pos, z_vel)
+        emf2 = self.get_coil2_emf(z_pos, z_vel)
+        
+        current1 = emf1 / self.coil1.resistance
+        current2 = emf2 / self.coil2.resistance
+        
+        # Magnetic force (simplified - sum of forces from both coils)
+        # This is an approximation - in reality the force calculation would be more complex
+        z_rel_coil1 = z_pos - self.coil1_center
+        z_rel_coil2 = z_pos - self.coil2_center
+        
+        # Force from coil 1
+        if abs(z_rel_coil1) < self.coil1.L:
+            force1 = -current1 * self.coil1.m * self.coil1.mu_0 / (4 * np.pi) * 0.1  # Simplified
         else:
-            print(f"Unknown option: {sys.argv[1]}")
-            print("Available options:")
-            print("  python simulate.py                    - Run single magnet simulation")
-            print("  python simulate.py length_analysis    - Run comprehensive coil length analysis")
-            print("  python simulate.py compare            - Compare EMF curves for 0.1m, 1m, 10m coils")
-            print("  python simulate.py segmented          - Compare segmented vs continuous coils")
-            print("  python simulate.py gap_analysis       - Analyze effects of gap length between segments")
-            print("  python simulate.py emf_plot          - Show EMF vs time plot and coil transit time analysis")
+            force1 = 0
+            
+        # Force from coil 2
+        if abs(z_rel_coil2) < self.coil2.L:
+            force2 = -current2 * self.coil2.m * self.coil2.mu_0 / (4 * np.pi) * 0.1  # Simplified
+        else:
+            force2 = 0
+        
+        total_magnetic_force = force1 + force2
+        
+        # Net acceleration
+        acceleration = self.g + total_magnetic_force / self.mass
+        
+        return [z_vel, acceleration]
+    
+    def run_simulation(self, duration=2.0, dt=0.0001, initial_velocity=0.0):
+        """
+        Run the two-coil simulation.
+        
+        Args:
+            duration: Simulation time in seconds
+            dt: Time step
+            initial_velocity: Initial velocity of magnet
+            
+        Returns:
+            Dictionary with simulation results for both coils
+        """
+        # Time array
+        t = np.arange(0, duration, dt)
+        
+        # Initial conditions - start magnet well above both coils
+        total_system_length = (self.coil1_center + self.coil1.L/2) - (self.coil2_center - self.coil2.L/2)
+        initial_position = self.coil1_center + self.coil1.L/2 + total_system_length
+        initial_conditions = [initial_position, initial_velocity]
+        
+        # Solve differential equation
+        solution = odeint(self.equation_of_motion, initial_conditions, t)
+        positions = solution[:, 0]
+        velocities = solution[:, 1]
+        
+        # Calculate EMF and current for both coils at each time step
+        emf1_values = []
+        emf2_values = []
+        current1_values = []
+        current2_values = []
+        flux1_values = []
+        flux2_values = []
+        
+        for i, (pos, vel) in enumerate(zip(positions, velocities)):
+            emf1 = self.get_coil1_emf(pos, vel)
+            emf2 = self.get_coil2_emf(pos, vel)
+            
+            current1 = emf1 / self.coil1.resistance
+            current2 = emf2 / self.coil2.resistance
+            
+            # Calculate flux (relative to each coil center)
+            z_rel_coil1 = pos - self.coil1_center
+            z_rel_coil2 = pos - self.coil2_center
+            
+            flux1 = self.coil1.total_magnetic_flux(z_rel_coil1)
+            flux2 = self.coil2.total_magnetic_flux(z_rel_coil2)
+            
+            emf1_values.append(emf1)
+            emf2_values.append(emf2)
+            current1_values.append(current1)
+            current2_values.append(current2)
+            flux1_values.append(flux1)
+            flux2_values.append(flux2)
+        
+        return {
+            'time': t,
+            'position': positions,
+            'velocity': velocities,
+            'emf1': np.array(emf1_values),
+            'emf2': np.array(emf2_values),
+            'current1': np.array(current1_values),
+            'current2': np.array(current2_values),
+            'flux1': np.array(flux1_values),
+            'flux2': np.array(flux2_values),
+            'coil1_center': self.coil1_center,
+            'coil2_center': self.coil2_center,
+            'coil1_resistance': self.coil1.resistance,
+            'coil2_resistance': self.coil2.resistance
+        }
+
+
+def simulate_two_stacked_coils(coil1_length=0.5, coil1_turns=50, coil1_radius=0.02,
+                              coil2_length=0.5, coil2_turns=50, coil2_radius=0.02,
+                              gap_between_coils=0.05, initial_velocity=0.0,
+                              duration=2.0, dt=0.0001, save_data=True, save_plots=True):
+    """
+    Simulate two stacked coils and plot EMF vs time for each coil.
+    
+    Args:
+        coil1_length: Length of top coil in meters
+        coil1_turns: Number of turns in top coil
+        coil1_radius: Radius of top coil in meters
+        coil2_length: Length of bottom coil in meters
+        coil2_turns: Number of turns in bottom coil
+        coil2_radius: Radius of bottom coil in meters
+        gap_between_coils: Gap between coils in meters
+        initial_velocity: Initial velocity of magnet
+        duration: Simulation duration in seconds
+        dt: Time step
+        save_data: Whether to save data to CSV
+        save_plots: Whether to save plots
+        
+    Returns:
+        Dictionary with simulation results
+    """
+    print("=== Two Stacked Coils Simulation ===")
+    
+    # Create simulation
+    sim = TwoStackedCoilsSimulation(
+        coil1_radius=coil1_radius,
+        coil1_length=coil1_length,
+        coil1_turns=coil1_turns,
+        coil2_radius=coil2_radius,
+        coil2_length=coil2_length,
+        coil2_turns=coil2_turns,
+        gap_between_coils=gap_between_coils,
+        initial_velocity=initial_velocity
+    )
+    
+    # Run simulation
+    print("Running two-coil simulation...")
+    results = sim.run_simulation(duration=duration, dt=dt, initial_velocity=initial_velocity)
+    
+    # Extract results
+    time = results['time']
+    position = results['position']
+    velocity = results['velocity']
+    emf1 = results['emf1']
+    emf2 = results['emf2']
+    current1 = results['current1']
+    current2 = results['current2']
+    
+    # Calculate metrics
+    max_emf1 = np.max(np.abs(emf1)) * 1000  # mV
+    max_emf2 = np.max(np.abs(emf2)) * 1000  # mV
+    max_current1 = np.max(np.abs(current1)) * 1000  # mA
+    max_current2 = np.max(np.abs(current2)) * 1000  # mA
+    
+    print(f"\nSimulation Results:")
+    print(f"Coil 1 (Top):")
+    print(f"  Max EMF: {max_emf1:.2f} mV")
+    print(f"  Max Current: {max_current1:.2f} mA")
+    print(f"Coil 2 (Bottom):")
+    print(f"  Max EMF: {max_emf2:.2f} mV")
+    print(f"  Max Current: {max_current2:.2f} mA")
+    
+    # Create comprehensive plots
+    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+    fig.suptitle('Two Stacked Coils Simulation Results', fontsize=16, fontweight='bold')
+    
+    # EMF vs Time for both coils
+    axes[0, 0].plot(time, emf1 * 1000, 'b-', linewidth=2, label='Coil 1 (Top)')
+    axes[0, 0].plot(time, emf2 * 1000, 'r-', linewidth=2, label='Coil 2 (Bottom)')
+    axes[0, 0].set_xlabel('Time (s)')
+    axes[0, 0].set_ylabel('EMF (mV)')
+    axes[0, 0].set_title('EMF vs Time - Both Coils')
+    axes[0, 0].grid(True, alpha=0.3)
+    axes[0, 0].legend()
+    
+    # EMF vs Position for both coils
+    axes[0, 1].plot(position * 1000, emf1 * 1000, 'b-', linewidth=2, label='Coil 1 (Top)')
+    axes[0, 1].plot(position * 1000, emf2 * 1000, 'r-', linewidth=2, label='Coil 2 (Bottom)')
+    axes[0, 1].set_xlabel('Position (mm)')
+    axes[0, 1].set_ylabel('EMF (mV)')
+    axes[0, 1].set_title('EMF vs Position - Both Coils')
+    axes[0, 1].grid(True, alpha=0.3)
+    
+    # Add coil boundary markers
+    coil1_start = (results['coil1_center'] - coil1_length/2) * 1000
+    coil1_end = (results['coil1_center'] + coil1_length/2) * 1000
+    coil2_start = (results['coil2_center'] - coil2_length/2) * 1000
+    coil2_end = (results['coil2_center'] + coil2_length/2) * 1000
+    
+    axes[0, 1].axvspan(coil1_start, coil1_end, alpha=0.2, color='blue', label='Coil 1 region')
+    axes[0, 1].axvspan(coil2_start, coil2_end, alpha=0.2, color='red', label='Coil 2 region')
+    axes[0, 1].legend()
+    
+    # Current vs Time for both coils
+    axes[1, 0].plot(time, current1 * 1000, 'b-', linewidth=2, label='Coil 1 (Top)')
+    axes[1, 0].plot(time, current2 * 1000, 'r-', linewidth=2, label='Coil 2 (Bottom)')
+    axes[1, 0].set_xlabel('Time (s)')
+    axes[1, 0].set_ylabel('Current (mA)')
+    axes[1, 0].set_title('Current vs Time - Both Coils')
+    axes[1, 0].grid(True, alpha=0.3)
+    axes[1, 0].legend()
+    
+    # Position vs Time with coil regions
+    axes[1, 1].plot(time, position * 1000, 'purple', linewidth=2, label='Magnet Position')
+    axes[1, 1].axhline(coil1_start, color='blue', linestyle='--', alpha=0.7, label='Coil 1 boundaries')
+    axes[1, 1].axhline(coil1_end, color='blue', linestyle='--', alpha=0.7)
+    axes[1, 1].axhline(coil2_start, color='red', linestyle='--', alpha=0.7, label='Coil 2 boundaries')
+    axes[1, 1].axhline(coil2_end, color='red', linestyle='--', alpha=0.7)
+    axes[1, 1].set_xlabel('Time (s)')
+    axes[1, 1].set_ylabel('Position (mm)')
+    axes[1, 1].set_title('Magnet Position vs Time')
+    axes[1, 1].grid(True, alpha=0.3)
+    axes[1, 1].legend()
+    
+    plt.tight_layout()
+    
+    if save_plots:
+        os.makedirs('two_coils_output', exist_ok=True)
+        plt.savefig('two_coils_output/two_coils_simulation.png', dpi=150, bbox_inches='tight')
+        print(f"Plot saved to: two_coils_output/two_coils_simulation.png")
+    
+    plt.show()
+    
+    # Create focused EMF comparison plot
+    plt.figure(figsize=(12, 6))
+    plt.plot(time, emf1 * 1000, 'b-', linewidth=2, label='Coil 1 (Top)')
+    plt.plot(time, emf2 * 1000, 'r-', linewidth=2, label='Coil 2 (Bottom)')
+    plt.xlabel('Time (s)', fontsize=12)
+    plt.ylabel('EMF (mV)', fontsize=12)
+    plt.title('EMF vs Time - Two Stacked Coils Comparison', fontsize=14, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=11)
+    
+    # Add parameter text box
+    textstr = f'Coil 1: {coil1_length*1000:.0f}mm, {coil1_turns} turns\nCoil 2: {coil2_length*1000:.0f}mm, {coil2_turns} turns\nGap: {gap_between_coils*1000:.1f}mm'
+    props = dict(boxstyle='round', facecolor='lightblue', alpha=0.8)
+    plt.text(0.02, 0.98, textstr, transform=plt.gca().transAxes, fontsize=10,
+             verticalalignment='top', bbox=props)
+    
+    plt.tight_layout()
+    
+    if save_plots:
+        plt.savefig('two_coils_output/emf_comparison_focused.png', dpi=150, bbox_inches='tight')
+        print(f"EMF comparison plot saved to: two_coils_output/emf_comparison_focused.png")
+    
+    plt.show()
+    
+    # Save data if requested
+    if save_data:
+        os.makedirs('two_coils_output', exist_ok=True)
+        
+        # Create DataFrame
+        data_df = pd.DataFrame({
+            'Time_s': time,
+            'Position_mm': position * 1000,
+            'Velocity_ms': velocity,
+            'EMF1_mV': emf1 * 1000,
+            'EMF2_mV': emf2 * 1000,
+            'Current1_mA': current1 * 1000,
+            'Current2_mA': current2 * 1000,
+            'Flux1_Wb': results['flux1'],
+            'Flux2_Wb': results['flux2']
+        })
+        
+        filename = 'two_coils_output/two_coils_data.csv'
+        data_df.to_csv(filename, index=False)
+        print(f"Data saved to: {filename}")
+        
+        # Save parameters
+        params_filename = 'two_coils_output/simulation_parameters.txt'
+        with open(params_filename, 'w') as f:
+            f.write("Two Stacked Coils Simulation Parameters:\n")
+            f.write("========================================\n")
+            f.write(f"Coil 1 (Top):\n")
+            f.write(f"  Length: {coil1_length*1000:.1f} mm\n")
+            f.write(f"  Turns: {coil1_turns}\n")
+            f.write(f"  Radius: {coil1_radius*1000:.1f} mm\n")
+            f.write(f"  Resistance: {results['coil1_resistance']*1000:.2f} mΩ\n")
+            f.write(f"Coil 2 (Bottom):\n")
+            f.write(f"  Length: {coil2_length*1000:.1f} mm\n")
+            f.write(f"  Turns: {coil2_turns}\n")
+            f.write(f"  Radius: {coil2_radius*1000:.1f} mm\n")
+            f.write(f"  Resistance: {results['coil2_resistance']*1000:.2f} mΩ\n")
+            f.write(f"Gap between coils: {gap_between_coils*1000:.1f} mm\n")
+            f.write(f"Initial velocity: {initial_velocity} m/s\n")
+            f.write(f"Simulation duration: {duration} s\n")
+            f.write(f"\nResults:\n")
+            f.write(f"Coil 1 max EMF: {max_emf1:.2f} mV\n")
+            f.write(f"Coil 2 max EMF: {max_emf2:.2f} mV\n")
+            f.write(f"Coil 1 max current: {max_current1:.2f} mA\n")
+            f.write(f"Coil 2 max current: {max_current2:.2f} mA\n")
+        
+        print(f"Parameters saved to: {params_filename}")
+    
+    return {
+        'time': time,
+        'position': position,
+        'velocity': velocity,
+        'emf1': emf1,
+        'emf2': emf2,
+        'current1': current1,
+        'current2': current2,
+        'simulation': sim,
+        'max_emf1_mv': max_emf1,
+        'max_emf2_mv': max_emf2,
+        'max_current1_ma': max_current1,
+        'max_current2_ma': max_current2
+    }
+
+
+def run_two_coils_example():
+    """
+    Run an example two stacked coils simulation with default parameters.
+    """
+    print("Running two stacked coils example simulation...")
+    
+    # Run simulation with example parameters
+    results = simulate_two_stacked_coils(
+        coil1_length=0.1,       # 10 cm top coil
+        coil1_turns=100,        # 100 turns top coil
+        coil2_length=0.1,       # 10 cm bottom coil  
+        coil2_turns=100,        # 100 turns bottom coil
+        gap_between_coils=0.02, # 2 cm gap
+        initial_velocity=0.0,   # Drop from rest
+        duration=1.0,           # 1 second simulation
+        save_data=True,
+        save_plots=True
+    )
+    
+    print("Two stacked coils simulation completed!")
+    return results
+
+
+def analyze_emf_extrema_positions(results, sim, verbose=True):
+    """
+    Analyze EMF extrema positions and compare with theoretical 1/4 and 3/4 positions.
+    
+    Args:
+        results: Dictionary containing simulation results
+        sim: Simulation object
+        verbose: Whether to print detailed analysis
+        
+    Returns:
+        Dictionary with extrema analysis results
+    """
+    time = results['time']
+    position = results['position']
+    emf = results['emf']
+    
+    # Define coil boundaries
+    coil_top = sim.L/2
+    coil_bottom = -sim.L/2
+    coil_center = 0
+    coil_length = sim.L
+    
+    # Find EMF extrema (considering only data within the coil region)
+    # Add small buffer to ensure we capture extrema near boundaries
+    buffer = 0.01  # 1 cm buffer
+    coil_mask = (position >= coil_bottom - buffer) & (position <= coil_top + buffer)
+    
+    if not np.any(coil_mask):
+        if verbose:
+            print("Warning: No data points found within coil region")
+        return None
+    
+    # Extract data within coil region
+    position_coil = position[coil_mask]
+    emf_coil = emf[coil_mask]
+    time_coil = time[coil_mask]
+    
+    # Find maximum and minimum EMF indices within coil region
+    max_emf_idx_local = np.argmax(emf_coil)
+    min_emf_idx_local = np.argmin(emf_coil)
+    
+    # Get actual extrema positions
+    max_emf_position = position_coil[max_emf_idx_local]
+    min_emf_position = position_coil[min_emf_idx_local]
+    max_emf_value = emf_coil[max_emf_idx_local]
+    min_emf_value = emf_coil[min_emf_idx_local]
+    max_emf_time = time_coil[max_emf_idx_local]
+    min_emf_time = time_coil[min_emf_idx_local]
+    
+    # Calculate positions as fractions of coil length from top
+    # Fraction = 0 means at top of coil, fraction = 1 means at bottom of coil
+    max_emf_fraction_from_top = (coil_top - max_emf_position) / coil_length
+    min_emf_fraction_from_top = (coil_top - min_emf_position) / coil_length
+    
+    # Theoretical positions (1/4 and 3/4 from top)
+    theoretical_quarter_position = coil_top - 0.25 * coil_length  # 1/4 from top
+    theoretical_three_quarter_position = coil_top - 0.75 * coil_length  # 3/4 from top
+    
+    # Calculate deviations from theoretical positions
+    max_emf_deviation_from_quarter = abs(max_emf_position - theoretical_quarter_position)
+    min_emf_deviation_from_three_quarter = abs(min_emf_position - theoretical_three_quarter_position)
+    
+    # Also check if min is at 1/4 and max is at 3/4 (opposite case)
+    max_emf_deviation_from_three_quarter = abs(max_emf_position - theoretical_three_quarter_position)
+    min_emf_deviation_from_quarter = abs(min_emf_position - theoretical_quarter_position)
+    
+    # Determine which theoretical assignment is better
+    case1_total_deviation = max_emf_deviation_from_quarter + min_emf_deviation_from_three_quarter
+    case2_total_deviation = max_emf_deviation_from_three_quarter + min_emf_deviation_from_quarter
+    
+    if case1_total_deviation <= case2_total_deviation:
+        # Case 1: Max EMF at 1/4, Min EMF at 3/4
+        best_case = "Max at 1/4, Min at 3/4"
+        max_theoretical_pos = theoretical_quarter_position
+        min_theoretical_pos = theoretical_three_quarter_position
+        max_theoretical_fraction = 0.25
+        min_theoretical_fraction = 0.75
+        max_deviation = max_emf_deviation_from_quarter
+        min_deviation = min_emf_deviation_from_three_quarter
     else:
-        print("Running single magnet simulation...")
-        print("Available options:")
-        print("  python simulate.py                    - Run single magnet simulation")
-        print("  python simulate.py length_analysis    - Run comprehensive coil length analysis") 
-        print("  python simulate.py compare            - Compare EMF curves for 0.1m, 1m, 10m coils")
-        print("  python simulate.py segmented          - Compare segmented vs continuous coils")
-        print("  python simulate.py gap_analysis       - Analyze effects of gap length between segments")
-        print("  python simulate.py emf_plot          - Show scientific EMF vs time plot only")
-        results = run_magnet_simulation()
+        # Case 2: Max EMF at 3/4, Min EMF at 1/4
+        best_case = "Max at 3/4, Min at 1/4"
+        max_theoretical_pos = theoretical_three_quarter_position
+        min_theoretical_pos = theoretical_quarter_position
+        max_theoretical_fraction = 0.75
+        min_theoretical_fraction = 0.25
+        max_deviation = max_emf_deviation_from_three_quarter
+        min_deviation = min_emf_deviation_from_quarter
+    
+    if verbose:
+        print(f"\n" + "="*60)
+        print(f"EMF EXTREMA POSITION ANALYSIS")
+        print(f"="*60)
+        
+        print(f"\nCoil Geometry:")
+        print(f"  Coil length: {coil_length*1000:.1f} mm")
+        print(f"  Coil top: {coil_top*1000:.1f} mm")
+        print(f"  Coil bottom: {coil_bottom*1000:.1f} mm")
+        print(f"  Coil center: {coil_center*1000:.1f} mm")
+        
+        print(f"\nTheoretical Positions:")
+        print(f"  1/4 position: {theoretical_quarter_position*1000:.1f} mm")
+        print(f"  3/4 position: {theoretical_three_quarter_position*1000:.1f} mm")
+        
+        print(f"\nActual EMF Extrema:")
+        print(f"  Maximum EMF: {max_emf_value*1000:.3f} mV")
+        print(f"    Position: {max_emf_position*1000:.1f} mm")
+        print(f"    Fraction from top: {max_emf_fraction_from_top:.3f}")
+        print(f"    Time: {max_emf_time:.4f} s")
+        
+        print(f"  Minimum EMF: {min_emf_value*1000:.3f} mV")
+        print(f"    Position: {min_emf_position*1000:.1f} mm")
+        print(f"    Fraction from top: {min_emf_fraction_from_top:.3f}")
+        print(f"    Time: {min_emf_time:.4f} s")
+        
+        print(f"\nComparison with Theory:")
+        print(f"  Best theoretical assignment: {best_case}")
+        
+        print(f"\n  Maximum EMF Analysis:")
+        print(f"    Actual fraction from top: {max_emf_fraction_from_top:.3f}")
+        print(f"    Theoretical fraction: {max_theoretical_fraction:.3f}")
+        print(f"    Deviation: {abs(max_emf_fraction_from_top - max_theoretical_fraction):.3f}")
+        print(f"    Position deviation: {max_deviation*1000:.1f} mm")
+        
+        print(f"\n  Minimum EMF Analysis:")
+        print(f"    Actual fraction from top: {min_emf_fraction_from_top:.3f}")
+        print(f"    Theoretical fraction: {min_theoretical_fraction:.3f}")
+        print(f"    Deviation: {abs(min_emf_fraction_from_top - min_theoretical_fraction):.3f}")
+        print(f"    Position deviation: {min_deviation*1000:.1f} mm")
+        
+        # Accuracy assessment
+        position_tolerance = 0.05  # 5% tolerance
+        if (abs(max_emf_fraction_from_top - max_theoretical_fraction) <= position_tolerance and 
+            abs(min_emf_fraction_from_top - min_theoretical_fraction) <= position_tolerance):
+            print(f"\n  ✓ EXCELLENT agreement with theory (within {position_tolerance*100:.0f}% tolerance)")
+        elif (abs(max_emf_fraction_from_top - max_theoretical_fraction) <= 0.1 and 
+              abs(min_emf_fraction_from_top - min_theoretical_fraction) <= 0.1):
+            print(f"\n  ✓ GOOD agreement with theory (within 10% tolerance)")
+        elif (abs(max_emf_fraction_from_top - max_theoretical_fraction) <= 0.2 and 
+              abs(min_emf_fraction_from_top - min_theoretical_fraction) <= 0.2):
+            print(f"\n  ~ FAIR agreement with theory (within 20% tolerance)")
+        else:
+            print(f"\n  ✗ POOR agreement with theory (deviations > 20%)")
+        
+        print(f"\n" + "="*60)
+    
+    # Return analysis results
+    return {
+        'coil_length': coil_length,
+        'coil_top': coil_top,
+        'coil_bottom': coil_bottom,
+        'max_emf_value': max_emf_value,
+        'min_emf_value': min_emf_value,
+        'max_emf_position': max_emf_position,
+        'min_emf_position': min_emf_position,
+        'max_emf_time': max_emf_time,
+        'min_emf_time': min_emf_time,
+        'max_emf_fraction_from_top': max_emf_fraction_from_top,
+        'min_emf_fraction_from_top': min_emf_fraction_from_top,
+        'theoretical_quarter_position': theoretical_quarter_position,
+        'theoretical_three_quarter_position': theoretical_three_quarter_position,
+        'best_theoretical_assignment': best_case,
+        'max_theoretical_fraction': max_theoretical_fraction,
+        'min_theoretical_fraction': min_theoretical_fraction,
+        'max_position_deviation': max_deviation,
+        'min_position_deviation': min_deviation,
+        'max_fraction_deviation': abs(max_emf_fraction_from_top - max_theoretical_fraction),
+        'min_fraction_deviation': abs(min_emf_fraction_from_top - min_theoretical_fraction)
+    }
+
+
+def simulate_single_coil_with_extrema_analysis(magnetic_dipole_moment=2.0, spring_radius=0.02, spring_length=1.0, 
+                                             num_turns=50, wire_radius=0.001, resistivity=1.7e-8, 
+                                             magnet_mass=0.01, gravity=9.81, initial_velocity=0.0, 
+                                             duration=1.0, dt=0.0001, save_data=True, save_plots=True):
+    """
+    Simulate a single coil with detailed EMF extrema analysis comparing actual vs theoretical positions.
+    
+    Args:
+        magnetic_dipole_moment: Magnetic dipole moment in A·m²
+        spring_radius: Radius of the spring coil in meters
+        spring_length: Length of the spring in meters
+        num_turns: Number of turns in the spring
+        wire_radius: Radius of the wire forming the spring
+        resistivity: Electrical resistivity of the wire material (Ω·m)
+        magnet_mass: Mass of the magnet in kg
+        gravity: Gravitational acceleration in m/s²
+        initial_velocity: Initial velocity of the magnet (m/s)
+        duration: Simulation duration in seconds
+        dt: Time step for simulation
+        save_data: Whether to save simulation data to CSV
+        save_plots: Whether to save plots to files
+        
+    Returns:
+        Dictionary containing simulation results and extrema analysis
+    """
+    print("=== Single Coil Simulation with EMF Extrema Analysis ===")
+    print(f"Simulating magnet through single coil...")
+    print(f"Initial velocity: {initial_velocity} m/s")
+    print(f"Duration: {duration} s")
+    
+    # Create simulation object
+    sim = MagnetThroughSpringSimulation(
+        magnetic_dipole_moment=magnetic_dipole_moment,
+        spring_radius=spring_radius,
+        spring_length=spring_length,
+        num_turns=num_turns,
+        wire_radius=wire_radius,
+        resistivity=resistivity,
+        magnet_mass=magnet_mass,
+        gravity=gravity
+    )
+    
+    # Run simulation
+    print("Running simulation...")
+    results = sim.run_simulation(duration=duration, dt=dt)
+    
+    # Perform detailed extrema analysis
+    print("Analyzing EMF extrema positions...")
+    extrema_analysis = analyze_emf_extrema_positions(results, sim, verbose=True)
+    
+    # Extract data for plotting
+    time = results['time']
+    position = results['position']
+    velocity = results['velocity']
+    emf = results['emf']
+    current = results['current']
+    flux = results['flux']
+    
+    # Calculate some metrics
+    max_emf = np.max(np.abs(emf)) * 1000  # mV
+    min_emf = np.min(emf) * 1000  # mV
+    max_emf_pos = np.max(emf) * 1000  # mV
+    max_current = np.max(np.abs(current)) * 1000  # mA
+    
+    print(f"\nBasic Simulation Results:")
+    print(f"  Maximum EMF magnitude: {max_emf:.2f} mV")
+    print(f"  Maximum positive EMF: {max_emf_pos:.2f} mV")
+    print(f"  Minimum EMF: {min_emf:.2f} mV")
+    print(f"  Maximum current: {max_current:.2f} mA")
+    print(f"  Coil resistance: {sim.resistance*1000:.2f} mΩ")
+    
+    # Create enhanced plots with extrema analysis
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle('Single Coil Simulation with EMF Extrema Analysis', fontsize=16, fontweight='bold')
+    
+    # EMF vs Time with extrema markers
+    axes[0, 0].plot(time, emf * 1000, 'b-', linewidth=2, label='EMF')
+    if extrema_analysis:
+        axes[0, 0].plot(extrema_analysis['max_emf_time'], extrema_analysis['max_emf_value'] * 1000, 
+                       'ro', markersize=8, label=f'Max EMF ({extrema_analysis["max_emf_fraction_from_top"]:.3f} from top)')
+        axes[0, 0].plot(extrema_analysis['min_emf_time'], extrema_analysis['min_emf_value'] * 1000, 
+                       'go', markersize=8, label=f'Min EMF ({extrema_analysis["min_emf_fraction_from_top"]:.3f} from top)')
+    axes[0, 0].set_xlabel('Time (s)')
+    axes[0, 0].set_ylabel('EMF (mV)')
+    axes[0, 0].set_title('Induced EMF vs Time')
+    axes[0, 0].grid(True, alpha=0.3)
+    axes[0, 0].legend()
+    
+    # EMF vs Position with theoretical markers
+    axes[0, 1].plot(position * 1000, emf * 1000, 'b-', linewidth=2, label='EMF')
+    
+    # Add coil boundaries
+    coil_start = -spring_length/2 * 1000
+    coil_end = spring_length/2 * 1000
+    axes[0, 1].axvline(coil_start, color='gray', linestyle='--', alpha=0.7, label='Coil boundaries')
+    axes[0, 1].axvline(coil_end, color='gray', linestyle='--', alpha=0.7)
+    
+    if extrema_analysis:
+        # Mark actual extrema
+        axes[0, 1].plot(extrema_analysis['max_emf_position'] * 1000, extrema_analysis['max_emf_value'] * 1000, 
+                       'ro', markersize=8, label=f'Actual Max EMF')
+        axes[0, 1].plot(extrema_analysis['min_emf_position'] * 1000, extrema_analysis['min_emf_value'] * 1000, 
+                       'go', markersize=8, label=f'Actual Min EMF')
+        
+        # Mark theoretical positions
+        axes[0, 1].axvline(extrema_analysis['theoretical_quarter_position'] * 1000, 
+                          color='red', linestyle=':', alpha=0.8, label='Theoretical 1/4 position')
+        axes[0, 1].axvline(extrema_analysis['theoretical_three_quarter_position'] * 1000, 
+                          color='green', linestyle=':', alpha=0.8, label='Theoretical 3/4 position')
+    
+    axes[0, 1].set_xlabel('Position (mm)')
+    axes[0, 1].set_ylabel('EMF (mV)')
+    axes[0, 1].set_title('Induced EMF vs Position with Theoretical Markers')
+    axes[0, 1].grid(True, alpha=0.3)
+    axes[0, 1].legend()
+    
+    # Current vs Time
+    axes[1, 0].plot(time, current * 1000, 'g-', linewidth=2, label='Current')
+    axes[1, 0].set_xlabel('Time (s)')
+    axes[1, 0].set_ylabel('Current (mA)')
+    axes[1, 0].set_title('Induced Current vs Time')
+    axes[1, 0].grid(True, alpha=0.3)
+    axes[1, 0].legend()
+    
+    # Position vs Time with coil region highlighted
+    axes[1, 1].plot(time, position * 1000, 'purple', linewidth=2, label='Magnet Position')
+    axes[1, 1].axhline(coil_start, color='gray', linestyle='--', alpha=0.7, label='Coil boundaries')
+    axes[1, 1].axhline(coil_end, color='gray', linestyle='--', alpha=0.7)
+    
+    if extrema_analysis:
+        # Highlight coil region
+        axes[1, 1].axhspan(coil_start, coil_end, alpha=0.1, color='blue', label='Coil region')
+        
+        # Mark extrema times
+        axes[1, 1].axvline(extrema_analysis['max_emf_time'], color='red', linestyle=':', alpha=0.8, 
+                          label='Max EMF time')
+        axes[1, 1].axvline(extrema_analysis['min_emf_time'], color='green', linestyle=':', alpha=0.8, 
+                          label='Min EMF time')
+    
+    axes[1, 1].set_xlabel('Time (s)')
+    axes[1, 1].set_ylabel('Position (mm)')
+    axes[1, 1].set_title('Magnet Position vs Time')
+    axes[1, 1].grid(True, alpha=0.3)
+    axes[1, 1].legend()
+    
+    plt.tight_layout()
+    
+    if save_plots:
+        # Create output directory
+        os.makedirs('single_coil_output', exist_ok=True)
+        
+        plt.savefig('single_coil_output/single_coil_extrema_analysis.png', dpi=150, bbox_inches='tight')
+        print(f"Enhanced plot saved to: single_coil_output/single_coil_extrema_analysis.png")
+    
+    plt.show()
+    
+    # Create a focused EMF vs Position plot for publication
+    plt.figure(figsize=(12, 8))
+    plt.plot(position * 1000, emf * 1000, 'b-', linewidth=3, label='Induced EMF')
+    
+    # Add coil boundaries
+    plt.axvline(coil_start, color='black', linestyle='-', alpha=0.8, linewidth=2, label='Coil boundaries')
+    plt.axvline(coil_end, color='black', linestyle='-', alpha=0.8, linewidth=2)
+    
+    if extrema_analysis:
+        # Mark actual extrema with larger markers
+        plt.plot(extrema_analysis['max_emf_position'] * 1000, extrema_analysis['max_emf_value'] * 1000, 
+                'ro', markersize=12, label=f'Max EMF (fraction: {extrema_analysis["max_emf_fraction_from_top"]:.3f})')
+        plt.plot(extrema_analysis['min_emf_position'] * 1000, extrema_analysis['min_emf_value'] * 1000, 
+                'go', markersize=12, label=f'Min EMF (fraction: {extrema_analysis["min_emf_fraction_from_top"]:.3f})')
+        
+        # Mark theoretical positions with dashed lines
+        plt.axvline(extrema_analysis['theoretical_quarter_position'] * 1000, 
+                   color='red', linestyle='--', alpha=0.8, linewidth=2, label='Theoretical 1/4 position')
+        plt.axvline(extrema_analysis['theoretical_three_quarter_position'] * 1000, 
+                   color='green', linestyle='--', alpha=0.8, linewidth=2, label='Theoretical 3/4 position')
+        
+        # Add text annotations
+        plt.annotate(f'Max EMF\n{extrema_analysis["max_emf_value"]*1000:.2f} mV\nFraction: {extrema_analysis["max_emf_fraction_from_top"]:.3f}',
+                    xy=(extrema_analysis['max_emf_position'] * 1000, extrema_analysis['max_emf_value'] * 1000),
+                    xytext=(10, 10), textcoords='offset points', fontsize=10,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='red', alpha=0.3),
+                    arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+        
+        plt.annotate(f'Min EMF\n{extrema_analysis["min_emf_value"]*1000:.2f} mV\nFraction: {extrema_analysis["min_emf_fraction_from_top"]:.3f}',
+                    xy=(extrema_analysis['min_emf_position'] * 1000, extrema_analysis['min_emf_value'] * 1000),
+                    xytext=(10, -30), textcoords='offset points', fontsize=10,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='green', alpha=0.3),
+                    arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+    
+    plt.xlabel('Position (mm)', fontsize=14)
+    plt.ylabel('EMF (mV)', fontsize=14)
+    plt.title('EMF vs Position: Actual vs Theoretical Extrema Locations', fontsize=16, fontweight='bold')
+    plt.grid(True, alpha=0.3)
+    plt.legend(fontsize=12)
+    
+    # Add parameter text box
+    if extrema_analysis:
+        textstr = (f'Coil Length: {spring_length*1000:.0f} mm\n'
+                  f'Turns: {num_turns}\n'
+                  f'Radius: {spring_radius*1000:.1f} mm\n'
+                  f'Best fit: {extrema_analysis["best_theoretical_assignment"]}\n'
+                  f'Max deviation: {extrema_analysis["max_fraction_deviation"]:.3f}\n'
+                  f'Min deviation: {extrema_analysis["min_fraction_deviation"]:.3f}')
+    else:
+        textstr = f'Coil Length: {spring_length*1000:.0f} mm\nTurns: {num_turns}\nRadius: {spring_radius*1000:.1f} mm'
+    
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+    plt.text(0.02, 0.98, textstr, transform=plt.gca().transAxes, fontsize=11,
+             verticalalignment='top', bbox=props)
+    
+    plt.tight_layout()
+    
+    if save_plots:
+        plt.savefig('single_coil_output/emf_vs_position_extrema_analysis.png', dpi=150, bbox_inches='tight')
+        print(f"EMF vs Position analysis plot saved to: single_coil_output/emf_vs_position_extrema_analysis.png")
+    
+    plt.show()
+    
+    # Save enhanced data if requested
+    if save_data:
+        os.makedirs('single_coil_output', exist_ok=True)
+        
+        # Create DataFrame with additional analysis columns
+        data_df = pd.DataFrame({
+            'Time_s': time,
+            'Position_mm': position * 1000,
+            'Position_fraction_from_top': (sim.L/2 - position) / sim.L,
+            'Velocity_ms': velocity,
+            'EMF_mV': emf * 1000,
+            'Current_mA': current * 1000,
+            'MagneticFlux_Wb': flux
+        })
+        
+        # Save to CSV
+        filename = 'single_coil_output/single_coil_extrema_data.csv'
+        data_df.to_csv(filename, index=False)
+        print(f"Enhanced data saved to: {filename}")
+        
+        # Save detailed analysis results
+        if extrema_analysis:
+            analysis_filename = 'single_coil_output/extrema_analysis_results.txt'
+            with open(analysis_filename, 'w') as f:
+                f.write("EMF EXTREMA POSITION ANALYSIS RESULTS\n")
+                f.write("=====================================\n\n")
+                f.write(f"Coil Parameters:\n")
+                f.write(f"  Length: {spring_length*1000:.1f} mm\n")
+                f.write(f"  Radius: {spring_radius*1000:.1f} mm\n")
+                f.write(f"  Turns: {num_turns}\n")
+                f.write(f"  Resistance: {sim.resistance*1000:.2f} mΩ\n\n")
+                
+                f.write(f"Theoretical Positions:\n")
+                f.write(f"  1/4 position: {extrema_analysis['theoretical_quarter_position']*1000:.1f} mm\n")
+                f.write(f"  3/4 position: {extrema_analysis['theoretical_three_quarter_position']*1000:.1f} mm\n\n")
+                
+                f.write(f"Actual EMF Extrema:\n")
+                f.write(f"  Maximum EMF: {extrema_analysis['max_emf_value']*1000:.3f} mV\n")
+                f.write(f"    Position: {extrema_analysis['max_emf_position']*1000:.1f} mm\n")
+                f.write(f"    Fraction from top: {extrema_analysis['max_emf_fraction_from_top']:.3f}\n")
+                f.write(f"    Time: {extrema_analysis['max_emf_time']:.4f} s\n\n")
+                
+                f.write(f"  Minimum EMF: {extrema_analysis['min_emf_value']*1000:.3f} mV\n")
+                f.write(f"    Position: {extrema_analysis['min_emf_position']*1000:.1f} mm\n")
+                f.write(f"    Fraction from top: {extrema_analysis['min_emf_fraction_from_top']:.3f}\n")
+                f.write(f"    Time: {extrema_analysis['min_emf_time']:.4f} s\n\n")
+                
+                f.write(f"Comparison with Theory:\n")
+                f.write(f"  Best theoretical assignment: {extrema_analysis['best_theoretical_assignment']}\n")
+                f.write(f"  Max EMF theoretical fraction: {extrema_analysis['max_theoretical_fraction']:.3f}\n")
+                f.write(f"  Min EMF theoretical fraction: {extrema_analysis['min_theoretical_fraction']:.3f}\n")
+                f.write(f"  Max EMF fraction deviation: {extrema_analysis['max_fraction_deviation']:.3f}\n")
+                f.write(f"  Min EMF fraction deviation: {extrema_analysis['min_fraction_deviation']:.3f}\n")
+                f.write(f"  Max EMF position deviation: {extrema_analysis['max_position_deviation']*1000:.1f} mm\n")
+                f.write(f"  Min EMF position deviation: {extrema_analysis['min_position_deviation']*1000:.1f} mm\n")
+            
+            print(f"Detailed analysis saved to: {analysis_filename}")
+    
+    # Return comprehensive results dictionary
+    return {
+        'time': time,
+        'position': position,
+        'velocity': velocity,
+        'emf': emf,
+        'current': current,
+        'flux': flux,
+        'simulation': sim,
+        'max_emf_mv': max_emf,
+        'min_emf_mv': min_emf,
+        'max_current_ma': max_current,
+        'extrema_analysis': extrema_analysis
+    }
+
+
+def run_single_coil_extrema_example():
+    """
+    Run an example single coil simulation with EMF extrema analysis.
+    """
+    print("Running single coil simulation with EMF extrema analysis...")
+    
+    # Run simulation with example parameters
+    results = simulate_single_coil_with_extrema_analysis(
+        spring_length=0.1,      # 10 cm coil
+        num_turns=100,          # 100 turns
+        spring_radius=0.015,    # 15 mm radius
+        initial_velocity=0.0,   # Drop from rest
+        duration=0.5,           # 0.5 second simulation
+        save_data=True,
+        save_plots=True
+    )
+    
+    print("Single coil simulation with extrema analysis completed!")
+    return results
+
+
+if __name__ == "__main__":
+    # Add menu option for single coil simulation
+    print("Magnet Through Coil Simulation")
+    print("==============================")
+    print("1. Run comprehensive analysis")
+    print("2. Compare coil lengths")
+    print("3. Analyze gap length effects")
+    print("4. Compare segmented vs continuous coils")
+    print("5. Show EMF vs time plot only")
+    print("6. Compare initial velocities")
+    print("7. Run single coil simulation")
+    print("8. Single coil example")
+    print("9. Run two stacked coils simulation")
+    print("10. Two stacked coils example")
+    print("11. Single coil with EMF extrema analysis")
+    
+    choice = input("Enter your choice (1-11): ")
+    
+    if choice == "1":
+        run_magnet_simulation()
+    elif choice == "2":
+        compare_coil_lengths()
+    elif choice == "3":
+        analyze_gap_length_effects()
+    elif choice == "4":
+        compare_segmented_vs_continuous_coils()
+    elif choice == "5":
+        show_emf_time_plot_only()
+    elif choice == "6":
+        compare_initial_velocities()
+    elif choice == "7":
+        # Interactive single coil simulation
+        print("\nSingle Coil Simulation Setup")
+        print("============================")
+        
+        try:
+            length = float(input("Coil length (mm) [default: 100]: ") or "100") / 1000
+            turns = int(input("Number of turns [default: 100]: ") or "100")
+            radius = float(input("Coil radius (mm) [default: 15]: ") or "15") / 1000
+            velocity = float(input("Initial velocity (m/s) [default: 0]: ") or "0")
+            duration = float(input("Simulation duration (s) [default: 0.5]: ") or "0.5")
+            
+            simulate_single_coil(
+                spring_length=length,
+                num_turns=turns,
+                spring_radius=radius,
+                initial_velocity=velocity,
+                duration=duration,
+                save_data=True,
+                save_plots=True
+            )
+        except ValueError:
+            print("Invalid input. Using default parameters.")
+            run_single_coil_example()
+            
+    elif choice == "8":
+        run_single_coil_example()
+    elif choice == "9":
+        # Interactive two stacked coils simulation
+        print("\nTwo Stacked Coils Simulation Setup")
+        print("===================================")
+        
+        try:
+            coil1_length = float(input("Top coil length (mm) [default: 100]: ") or "100") / 1000
+            coil1_turns = int(input("Top coil turns [default: 100]: ") or "100")
+            coil2_length = float(input("Bottom coil length (mm) [default: 100]: ") or "100") / 1000
+            coil2_turns = int(input("Bottom coil turns [default: 100]: ") or "100")
+            gap = float(input("Gap between coils (mm) [default: 20]: ") or "20") / 1000
+            radius = float(input("Coil radius (mm) [default: 20]: ") or "20") / 1000
+            velocity = float(input("Initial velocity (m/s) [default: 0]: ") or "0")
+            duration = float(input("Simulation duration (s) [default: 1.0]: ") or "1.0")
+            
+            simulate_two_stacked_coils(
+                coil1_length=coil1_length,
+                coil1_turns=coil1_turns,
+                coil1_radius=radius,
+                coil2_length=coil2_length,
+                coil2_turns=coil2_turns,
+                coil2_radius=radius,
+                gap_between_coils=gap,
+                initial_velocity=velocity,
+                duration=duration,
+                save_data=True,
+                save_plots=True
+            )
+        except ValueError:
+            print("Invalid input. Using default parameters.")
+            run_two_coils_example()
+            
+    elif choice == "10":
+        run_two_coils_example()
+    elif choice == "11":
+        # Interactive single coil simulation with extrema analysis
+        print("\nSingle Coil EMF Extrema Analysis Setup")
+        print("=======================================")
+        
+        try:
+            length = float(input("Coil length (mm) [default: 100]: ") or "100") / 1000
+            turns = int(input("Number of turns [default: 100]: ") or "100")
+            radius = float(input("Coil radius (mm) [default: 15]: ") or "15") / 1000
+            velocity = float(input("Initial velocity (m/s) [default: 0]: ") or "0")
+            duration = float(input("Simulation duration (s) [default: 0.5]: ") or "0.5")
+            
+            simulate_single_coil_with_extrema_analysis(
+                spring_length=length,
+                num_turns=turns,
+                spring_radius=radius,
+                initial_velocity=velocity,
+                duration=duration,
+                save_data=True,
+                save_plots=True
+            )
+        except ValueError:
+            print("Invalid input. Using default parameters.")
+            run_single_coil_extrema_example()
+    else:
+        print("Invalid choice. Running single coil extrema analysis example.")
+        run_single_coil_extrema_example()
